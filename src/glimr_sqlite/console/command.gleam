@@ -34,7 +34,7 @@ pub fn handler(cmd: Command, db_handler: fn(ParsedArgs, Pool) -> Nil) -> Command
     driver_type: driver.Sqlite,
     run_with_pool: fn(args, conn) {
       case conn {
-        SqliteConnection(_, _, path, pool_size) -> {
+        SqliteConnection(_, path, pool_size) -> {
           case path, pool_size {
             Ok(p), Ok(ps) -> {
               let config = pool_connection.SqliteConfig(p, ps)

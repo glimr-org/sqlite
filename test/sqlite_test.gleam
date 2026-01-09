@@ -16,12 +16,7 @@ pub fn start_with_valid_connection_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let connections = [
-    SqliteConnection(
-      name: "main",
-      is_default: True,
-      database: Ok(test_db),
-      pool_size: Ok(2),
-    ),
+    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
   ]
 
   let p = sqlite.start("main", connections)
@@ -52,15 +47,9 @@ pub fn start_with_multiple_connections_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let connections = [
-    SqliteConnection(
-      name: "main",
-      is_default: True,
-      database: Ok(test_db),
-      pool_size: Ok(2),
-    ),
+    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
     SqliteConnection(
       name: "secondary",
-      is_default: False,
       database: Ok("test/fixtures/sqlite_secondary.db"),
       pool_size: Ok(1),
     ),
@@ -90,12 +79,7 @@ pub fn start_creates_usable_pool_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let connections = [
-    SqliteConnection(
-      name: "test",
-      is_default: True,
-      database: Ok(test_db),
-      pool_size: Ok(3),
-    ),
+    SqliteConnection(name: "test", database: Ok(test_db), pool_size: Ok(3)),
   ]
 
   let p = sqlite.start("test", connections)
