@@ -1,6 +1,8 @@
 import gleam/dynamic/decode
 import gleeunit/should
+import glimr/cache/driver.{DatabaseStore} as _cache_driver
 import glimr/db/driver.{SqliteConnection}
+import glimr_sqlite/cache/cache as sqlite_cache
 import glimr_sqlite/db/pool
 import glimr_sqlite/sqlite
 import simplifile
@@ -114,6 +116,108 @@ pub fn start_creates_usable_pool_test() {
   rows |> should.equal(["item1"])
 
   pool.stop_pool(p)
+  let _ = simplifile.delete(test_db)
+  Nil
+}
+
+// ------------------------------------------------------------- start_cache
+
+pub fn start_cache_with_valid_store_test() {
+  let _ = simplifile.delete(test_db)
+  let _ = simplifile.create_directory_all("test/fixtures")
+
+  let connections = [
+    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
+  ]
+  let stores = [
+    DatabaseStore(name: "cache", database: "main", table: "start_cache_test"),
+  ]
+
+  let db = sqlite.start("main", connections)
+
+  // Create the cache table
+  let _ =
+    pool.get_connection(db, fn(conn) {
+      sqlight.exec(
+        "CREATE TABLE IF NOT EXISTS start_cache_test (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          expiration INTEGER NOT NULL
+        )",
+        conn,
+      )
+    })
+
+  // Start the cache pool
+  let cache = sqlite.start_cache(db, "cache", stores)
+
+  // Verify it works by doing cache operations
+  sqlite_cache.put(cache, "test_key", "test_value", 3600) |> should.be_ok
+  sqlite_cache.get(cache, "test_key")
+  |> should.be_ok
+  |> should.equal("test_value")
+  sqlite_cache.forget(cache, "test_key") |> should.be_ok
+
+  pool.stop_pool(db)
+  let _ = simplifile.delete(test_db)
+  Nil
+}
+
+pub fn start_cache_with_multiple_stores_test() {
+  let _ = simplifile.delete(test_db)
+  let _ = simplifile.create_directory_all("test/fixtures")
+
+  let connections = [
+    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
+  ]
+  let stores = [
+    DatabaseStore(
+      name: "primary",
+      database: "main",
+      table: "cache_primary_test",
+    ),
+    DatabaseStore(
+      name: "secondary",
+      database: "main",
+      table: "cache_secondary_test",
+    ),
+  ]
+
+  let db = sqlite.start("main", connections)
+
+  // Create both cache tables
+  let _ =
+    pool.get_connection(db, fn(conn) {
+      let _ =
+        sqlight.exec(
+          "CREATE TABLE IF NOT EXISTS cache_primary_test (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            expiration INTEGER NOT NULL
+          )",
+          conn,
+        )
+      sqlight.exec(
+        "CREATE TABLE IF NOT EXISTS cache_secondary_test (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          expiration INTEGER NOT NULL
+        )",
+        conn,
+      )
+    })
+
+  // Start the secondary cache pool
+  let cache = sqlite.start_cache(db, "secondary", stores)
+
+  // Verify it works
+  sqlite_cache.put(cache, "secondary_key", "secondary_value", 3600)
+  |> should.be_ok
+  sqlite_cache.get(cache, "secondary_key")
+  |> should.be_ok
+  |> should.equal("secondary_value")
+
+  pool.stop_pool(db)
   let _ = simplifile.delete(test_db)
   Nil
 }

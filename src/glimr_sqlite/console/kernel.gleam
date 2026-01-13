@@ -2,17 +2,19 @@
 ////
 //// Provides SQLite-specific console commands for database
 //// operations. Users register these commands in their
-//// command_provider to enable sqlite:migrate and sqlite:gen.
+//// command_provider to enable sqlite:migrate, sqlite:gen,
+//// and sqlite:cache-table.
 
 import glimr/console/command.{type Command}
+import glimr_sqlite/internal/console/commands/cache_table
 import glimr_sqlite/internal/console/commands/gen
 import glimr_sqlite/internal/console/commands/migrate
 
 // ------------------------------------------------------------- Public Functions
 
-/// Returns the list of SQLite console commands. Add these to 
-/// your command_provider to enable sqlite:migrate and 
-/// sqlite:gen commands.
+/// Returns the list of SQLite console commands. Add these to
+/// your command_provider to enable sqlite:migrate, sqlite:gen,
+/// and sqlite:cache-table commands.
 ///
 /// *Example:*
 ///
@@ -31,5 +33,6 @@ pub fn commands() -> List(Command) {
   [
     migrate.command(),
     gen.command(),
+    cache_table.command(),
   ]
 }
