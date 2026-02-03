@@ -1,7 +1,6 @@
 import gleam/dynamic/decode
 import gleeunit/should
 import glimr/cache/driver.{DatabaseStore} as _cache_driver
-import glimr/db/driver.{SqliteConnection}
 import glimr_sqlite/cache/cache as sqlite_cache
 import glimr_sqlite/db/pool
 import glimr_sqlite/sqlite
@@ -10,6 +9,52 @@ import sqlight
 
 const test_db = "test/fixtures/sqlite_test.db"
 
+const config_dir = "config"
+
+const config_file = "config/database.toml"
+
+// ------------------------------------------------------------- Helpers
+
+fn setup_config(toml_content: String) -> Nil {
+  let _ = simplifile.create_directory_all(config_dir)
+  let _ = simplifile.write(config_file, toml_content)
+  Nil
+}
+
+fn cleanup_config() -> Nil {
+  let _ = simplifile.delete(config_file)
+  Nil
+}
+
+fn main_connection_toml() -> String {
+  "[connections.main]
+  driver = \"sqlite\"
+  database = \"" <> test_db <> "\"
+  pool_size = 2
+"
+}
+
+fn multi_connection_toml() -> String {
+  "[connections.main]
+  driver = \"sqlite\"
+  database = \"" <> test_db <> "\"
+  pool_size = 2
+
+[connections.secondary]
+  driver = \"sqlite\"
+  database = \"test/fixtures/sqlite_secondary.db\"
+  pool_size = 1
+"
+}
+
+fn test_connection_toml() -> String {
+  "[connections.test]
+  driver = \"sqlite\"
+  database = \"" <> test_db <> "\"
+  pool_size = 3
+"
+}
+
 // ------------------------------------------------------------- start
 
 pub fn start_with_valid_connection_test() {
@@ -17,11 +62,9 @@ pub fn start_with_valid_connection_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let connections = [
-    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
-  ]
+  setup_config(main_connection_toml())
 
-  let p = sqlite.start("main", connections)
+  let p = sqlite.start("main")
 
   // Verify the pool works by executing a query
   let result =
@@ -39,6 +82,7 @@ pub fn start_with_valid_connection_test() {
   rows |> should.equal([2])
 
   pool.stop_pool(p)
+  cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
 }
@@ -48,17 +92,10 @@ pub fn start_with_multiple_connections_test() {
   let _ = simplifile.delete("test/fixtures/sqlite_secondary.db")
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let connections = [
-    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
-    SqliteConnection(
-      name: "secondary",
-      database: Ok("test/fixtures/sqlite_secondary.db"),
-      pool_size: Ok(1),
-    ),
-  ]
+  setup_config(multi_connection_toml())
 
   // Start the secondary connection
-  let p = sqlite.start("secondary", connections)
+  let p = sqlite.start("secondary")
 
   // Verify it works
   let result =
@@ -71,6 +108,7 @@ pub fn start_with_multiple_connections_test() {
   rows |> should.equal([42])
 
   pool.stop_pool(p)
+  cleanup_config()
   let _ = simplifile.delete(test_db)
   let _ = simplifile.delete("test/fixtures/sqlite_secondary.db")
   Nil
@@ -80,11 +118,9 @@ pub fn start_creates_usable_pool_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let connections = [
-    SqliteConnection(name: "test", database: Ok(test_db), pool_size: Ok(3)),
-  ]
+  setup_config(test_connection_toml())
 
-  let p = sqlite.start("test", connections)
+  let p = sqlite.start("test")
 
   // Create a table and insert data
   let _ =
@@ -116,6 +152,7 @@ pub fn start_creates_usable_pool_test() {
   rows |> should.equal(["item1"])
 
   pool.stop_pool(p)
+  cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
 }
@@ -126,14 +163,13 @@ pub fn start_cache_with_valid_store_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let connections = [
-    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
-  ]
+  setup_config(main_connection_toml())
+
   let stores = [
     DatabaseStore(name: "cache", database: "main", table: "start_cache_test"),
   ]
 
-  let db = sqlite.start("main", connections)
+  let db = sqlite.start("main")
 
   // Create the cache table
   let _ =
@@ -159,6 +195,7 @@ pub fn start_cache_with_valid_store_test() {
   sqlite_cache.forget(cache, "test_key") |> should.be_ok
 
   pool.stop_pool(db)
+  cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
 }
@@ -167,9 +204,8 @@ pub fn start_cache_with_multiple_stores_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let connections = [
-    SqliteConnection(name: "main", database: Ok(test_db), pool_size: Ok(2)),
-  ]
+  setup_config(main_connection_toml())
+
   let stores = [
     DatabaseStore(
       name: "primary",
@@ -183,7 +219,7 @@ pub fn start_cache_with_multiple_stores_test() {
     ),
   ]
 
-  let db = sqlite.start("main", connections)
+  let db = sqlite.start("main")
 
   // Create both cache tables
   let _ =
@@ -218,6 +254,7 @@ pub fn start_cache_with_multiple_stores_test() {
   |> should.equal("secondary_value")
 
   pool.stop_pool(db)
+  cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
 }
