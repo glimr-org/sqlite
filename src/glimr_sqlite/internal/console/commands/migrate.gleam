@@ -1,4 +1,4 @@
-import glimr/console/command.{type Command, type ParsedArgs, Flag}
+import glimr/console/command.{type Args, type Command, Flag}
 import glimr_sqlite/console/command as command_sqlite
 import glimr_sqlite/db/pool.{type Pool}
 import glimr_sqlite/internal/actions/run_fresh
@@ -33,7 +33,7 @@ pub fn command() -> Command {
 
 /// Execute the console command.
 ///
-fn run(args: ParsedArgs, pool: Pool) -> Nil {
+fn run(args: Args, pool: Pool) -> Nil {
   let database = command.get_option(args, "database")
   let fresh = command.has_flag(args, "fresh")
   let status = command.has_flag(args, "status")
