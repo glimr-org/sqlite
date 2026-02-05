@@ -55,3 +55,9 @@ fn run(args: Args, pool: Pool, cache_stores: List(CacheStore)) -> Nil {
     }
   }
 }
+
+/// Console command's entry point
+///
+pub fn main() {
+  command.run(command())
+}

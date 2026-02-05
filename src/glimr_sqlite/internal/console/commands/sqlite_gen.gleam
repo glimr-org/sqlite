@@ -120,3 +120,9 @@ fn validate_models(
     }
   }
 }
+
+/// Console command's entry point
+///
+pub fn main() {
+  command.run(command())
+}

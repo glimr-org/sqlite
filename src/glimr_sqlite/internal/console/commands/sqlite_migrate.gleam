@@ -48,3 +48,9 @@ fn run(args: Args, pool: Pool) -> Nil {
     }
   }
 }
+
+/// Console command's entry point
+///
+pub fn main() {
+  command.run(command())
+}

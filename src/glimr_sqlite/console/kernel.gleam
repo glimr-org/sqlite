@@ -6,9 +6,9 @@
 //// and sqlite:cache-table.
 
 import glimr/console/command.{type Command}
-import glimr_sqlite/internal/console/commands/cache_table
-import glimr_sqlite/internal/console/commands/gen
-import glimr_sqlite/internal/console/commands/migrate
+import glimr_sqlite/internal/console/commands/sqlite_cache_table
+import glimr_sqlite/internal/console/commands/sqlite_gen
+import glimr_sqlite/internal/console/commands/sqlite_migrate
 
 // ------------------------------------------------------------- Public Functions
 
@@ -31,8 +31,8 @@ import glimr_sqlite/internal/console/commands/migrate
 ///
 pub fn commands() -> List(Command) {
   [
-    migrate.command(),
-    gen.command(),
-    cache_table.command(),
+    sqlite_migrate.command(),
+    sqlite_gen.command(),
+    sqlite_cache_table.command(),
   ]
 }
