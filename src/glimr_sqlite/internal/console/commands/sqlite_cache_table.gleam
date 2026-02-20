@@ -6,9 +6,6 @@ import glimr_sqlite/db/pool.{type Pool}
 import glimr_sqlite/internal/actions/gen_cache_table
 import glimr_sqlite/internal/actions/run_migrate
 
-/// The name of the console command.
-const name = "sqlite:cache-table"
-
 /// The console command description.
 const description = "Generate cache table migration for SQLite"
 
@@ -16,7 +13,6 @@ const description = "Generate cache table migration for SQLite"
 ///
 pub fn command() -> Command {
   command.new()
-  |> command.name(name)
   |> command.description(description)
   |> command.args([
     Flag(

@@ -1,11 +1,12 @@
+import glimr/config/session as session_config
 import glimr/console/command.{type Args, type Command, Flag}
 import glimr_sqlite/console/command as command_sqlite
 import glimr_sqlite/db/pool.{type Pool}
-import glimr_sqlite/internal/actions/run_fresh
+import glimr_sqlite/internal/actions/gen_session_table
 import glimr_sqlite/internal/actions/run_migrate
 
 /// The console command description.
-const description = "Run pending SQLite migrations"
+const description = "Generate session table migration for SQLite"
 
 /// Define the console command and its properties.
 ///
@@ -14,14 +15,9 @@ pub fn command() -> Command {
   |> command.description(description)
   |> command.args([
     Flag(
-      name: "fresh",
-      short: "f",
-      description: "Drop all tables and re-run all migrations",
-    ),
-    Flag(
-      name: "status",
-      short: "s",
-      description: "Show migration status without running",
+      name: "migrate",
+      short: "m",
+      description: "Run migrations after generating",
     ),
   ])
   |> command_sqlite.handler(run)
@@ -31,17 +27,14 @@ pub fn command() -> Command {
 ///
 fn run(args: Args, pool: Pool) -> Nil {
   let database = command.get_option(args, "database")
-  let fresh = command.has_flag(args, "fresh")
-  let status = command.has_flag(args, "status")
+  let should_migrate = command.has_flag(args, "migrate")
+  let config = session_config.load()
 
-  case status {
-    True -> run_migrate.show_status(pool, database)
-    False -> {
-      case fresh {
-        True -> run_fresh.run(pool, database)
-        False -> run_migrate.run(pool, database)
-      }
-    }
+  gen_session_table.run(database, config.table)
+
+  case should_migrate {
+    True -> run_migrate.run(pool, database)
+    False -> Nil
   }
 }
 

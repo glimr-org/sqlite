@@ -10,9 +10,6 @@ import glimr_sqlite/db/pool.{type Pool}
 import glimr_sqlite/internal/actions/run_migrate
 import simplifile
 
-/// The name of the console command.
-const name = "sqlite:gen"
-
 /// The console command description.
 const description = "Generate repository and migration code for SQLite"
 
@@ -20,7 +17,6 @@ const description = "Generate repository and migration code for SQLite"
 ///
 pub fn command() -> Command {
   command.new()
-  |> command.name(name)
   |> command.description(description)
   |> command.args([
     CmdOption(
