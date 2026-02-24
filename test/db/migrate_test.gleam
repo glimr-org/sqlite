@@ -1,8 +1,7 @@
 import gleam/dynamic/decode
 import gleeunit/should
-import glimr/db/migrate as framework_migrate
+import glimr/db/migrate
 import glimr/db/pool_connection
-import glimr_sqlite/db/migrate
 import glimr_sqlite/sqlite
 import simplifile
 
@@ -142,7 +141,7 @@ pub fn apply_pending_single_migration_test() {
     let assert Ok(_) = migrate.ensure_table(conn)
 
     let migration =
-      framework_migrate.Migration(
+      migrate.Migration(
         version: "001",
         name: "create_users",
         sql: "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
@@ -180,12 +179,12 @@ pub fn apply_pending_multiple_migrations_test() {
     let assert Ok(_) = migrate.ensure_table(conn)
 
     let migrations = [
-      framework_migrate.Migration(
+      migrate.Migration(
         version: "001",
         name: "create_users",
         sql: "CREATE TABLE users (id INTEGER PRIMARY KEY)",
       ),
-      framework_migrate.Migration(
+      migrate.Migration(
         version: "002",
         name: "create_posts",
         sql: "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER)",
@@ -209,7 +208,7 @@ pub fn apply_pending_multiple_statements_test() {
     let assert Ok(_) = migrate.ensure_table(conn)
 
     let migration =
-      framework_migrate.Migration(
+      migrate.Migration(
         version: "001",
         name: "multi_statement",
         sql: "CREATE TABLE a (id INTEGER); CREATE TABLE b (id INTEGER)",
@@ -241,17 +240,13 @@ pub fn apply_pending_stops_on_error_test() {
     let assert Ok(_) = migrate.ensure_table(conn)
 
     let migrations = [
-      framework_migrate.Migration(
+      migrate.Migration(
         version: "001",
         name: "good",
         sql: "CREATE TABLE good (id INTEGER)",
       ),
-      framework_migrate.Migration(
-        version: "002",
-        name: "bad",
-        sql: "INVALID SQL HERE",
-      ),
-      framework_migrate.Migration(
+      migrate.Migration(version: "002", name: "bad", sql: "INVALID SQL HERE"),
+      migrate.Migration(
         version: "003",
         name: "never_runs",
         sql: "CREATE TABLE never (id INTEGER)",
