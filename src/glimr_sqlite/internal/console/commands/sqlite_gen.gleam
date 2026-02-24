@@ -5,8 +5,8 @@ import glimr/console/command.{type Args, type Command, Flag, Option as CmdOption
 import glimr/console/console
 import glimr/db/gen as db_gen
 import glimr/db/gen/migrate as gen_migrate
+import glimr/db/pool_connection.{type Pool}
 import glimr_sqlite/console/command as command_sqlite
-import glimr_sqlite/db/pool.{type Pool}
 import glimr_sqlite/internal/actions/run_migrate
 import simplifile
 
@@ -57,11 +57,11 @@ fn run(args: Args, pool: Pool) -> Nil {
       |> console.print()
     }
     Ok(validated_filter) -> {
-      // Generate migrations with "sqlite" driver type
-      gen_migrate.run(database, "sqlite", validated_filter)
+      // Generate migrations
+      gen_migrate.run(database, validated_filter)
 
-      // Generate repositories with "sqlite" driver type
-      db_gen.run(database, "sqlite", validated_filter)
+      // Generate repositories
+      db_gen.run(database, validated_filter)
 
       // Optionally run migrations
       case should_migrate {

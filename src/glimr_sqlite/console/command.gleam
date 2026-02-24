@@ -18,8 +18,9 @@ import glimr/console/command.{
 }
 import glimr/console/console
 import glimr/db/driver.{SqliteConnection}
-import glimr/db/pool_connection
-import glimr_sqlite/db/pool.{type Pool}
+import glimr/db/pool_connection.{type Pool}
+import glimr_sqlite/db/pool
+import glimr_sqlite/db/query
 
 // ------------------------------------------------------------- Public Functions
 
@@ -107,8 +108,23 @@ fn connection_config(
 fn with_pool(config: pool_connection.Config, run: fn(Pool) -> Nil) -> Nil {
   case pool.start_pool(config) {
     Ok(p) -> {
-      run(p)
-      pool.stop_pool(p)
+      let #(checkout, stop) = pool.raw_checkout(p)
+      let core_pool =
+        pool_connection.new_pool(
+          driver: pool_connection.Sqlite,
+          query_fn: pool_connection.to_dynamic(query.vtable_query),
+          exec_fn: pool_connection.to_dynamic(query.vtable_exec),
+          checkout: fn() {
+            case checkout() {
+              Ok(#(conn, release)) ->
+                Ok(#(pool_connection.to_dynamic(conn), release))
+              Error(msg) -> Error(msg)
+            }
+          },
+          stop: stop,
+        )
+      run(core_pool)
+      pool_connection.stop_pool(core_pool)
     }
     Error(e) -> {
       print_error("Failed to start SQLite pool:")

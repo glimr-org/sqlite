@@ -1,19 +1,36 @@
-//// Query execution for SQLite databases.
+//// SQLite Query Execution
 ////
-//// Provides functions for executing SELECT queries and
-//// statements that don't return rows like INSERT, UPDATE,
-//// DELETE, and DDL statements.
+//// The sqlight library returns its own error types
+//// but the rest of the framework expects DbError.
+//// This module bridges that gap — wrapping sqlight
+//// calls so all query errors surface as the unified
+//// DbError type and callers never depend on sqlight
+//// directly.
 
+import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode.{type Decoder}
-import glimr/db/pool_connection.{type DbError, QueryError}
-import glimr_sqlite/db/pool.{type Connection}
+import gleam/list
+import glimr/db/pool_connection.{
+  type DbError, type QueryResult, type Value, QueryError, QueryResult,
+}
+import glimr_sqlite/db/gen
 import sqlight
+
+// ------------------------------------------------------------- Public Types
+
+/// Aliasing sqlight.Connection locally lets downstream code
+/// reference Connection without importing sqlight directly, so 
+/// the driver can be swapped without touching every call site.
+///
+pub type Connection =
+  sqlight.Connection
 
 // ------------------------------------------------------------- Public Functions
 
-/// Executes a SELECT query and decodes the results using the
-/// provided decoder. Returns a list of decoded rows on success
-/// or a database error on failure.
+/// Thin wrapper so application code can run SELECT queries 
+/// without importing sqlight or handling its error types. The 
+/// decoder is passed through unchanged since sqlight already 
+/// supports Gleam decoders.
 ///
 pub fn query(
   conn: Connection,
@@ -27,9 +44,10 @@ pub fn query(
   }
 }
 
-/// Executes a SQL statement that does not return rows, such as
-/// INSERT, UPDATE, DELETE, or DDL statements. Returns Ok on
-/// success or a database error on failure.
+/// DDL and write operations don't return rows, so a separate 
+/// function avoids forcing callers to supply a decoder they'd 
+/// never use. Errors are still mapped to DbError for consistency 
+/// with query.
 ///
 pub fn exec(conn: Connection, sql: String) -> Result(Nil, DbError) {
   case sqlight.exec(sql, conn) {
@@ -38,11 +56,63 @@ pub fn exec(conn: Connection, sql: String) -> Result(Nil, DbError) {
   }
 }
 
+/// The framework's pool_connection dispatches through a vtable 
+/// of Dynamic-typed callbacks so it stays driver-agnostic. This 
+/// function satisfies that interface by coercing the handle and 
+/// converting generic Values to sqlight-specific values before 
+/// executing.
+///
+pub fn vtable_query(
+  handle: Dynamic,
+  sql: String,
+  params: List(Value),
+  decoder: Decoder(a),
+) -> Result(QueryResult(a), DbError) {
+  let conn: sqlight.Connection = coerce(handle)
+  let sq_params = list.map(params, gen.to_sqlight_value)
+
+  case sqlight.query(sql, conn, sq_params, decoder) {
+    Ok(rows) -> Ok(QueryResult(list.length(rows), rows))
+    Error(e) -> Error(map_error(e))
+  }
+}
+
+/// sqlight.exec doesn't accept parameters, so writes with 
+/// params must go through sqlight.query with a dummy decoder. 
+/// The branch on empty params avoids that workaround when no 
+/// parameters are needed, using the more efficient exec path 
+/// instead.
+///
+pub fn vtable_exec(
+  handle: Dynamic,
+  sql: String,
+  params: List(Value),
+) -> Result(Int, DbError) {
+  let conn: sqlight.Connection = coerce(handle)
+  let sq_params = list.map(params, gen.to_sqlight_value)
+
+  case list.is_empty(sq_params) {
+    True -> {
+      case sqlight.exec(sql, conn) {
+        Ok(_) -> Ok(0)
+        Error(e) -> Error(map_error(e))
+      }
+    }
+    False -> {
+      case sqlight.query(sql, conn, sq_params, decode.dynamic) {
+        Ok(rows) -> Ok(list.length(rows))
+        Error(e) -> Error(map_error(e))
+      }
+    }
+  }
+}
+
 // ------------------------------------------------------------- Private Functions
 
-/// Converts a sqlight.Error to a DbError. Extracts the error
-/// code and message from the SQLite error and formats them
-/// into a QueryError with a descriptive message.
+/// sqlight errors carry SQLite-specific codes that mean nothing 
+/// to framework code expecting DbError. Mapping them here keeps 
+/// the conversion in one place so every call site doesn't 
+/// repeat the same pattern match.
 ///
 fn map_error(e: sqlight.Error) -> DbError {
   case e {
@@ -51,9 +121,11 @@ fn map_error(e: sqlight.Error) -> DbError {
   }
 }
 
-/// Formats a SQLite error code and message into a readable
-/// string. Maps constraint error codes to descriptive names
-/// like UNIQUE_CONSTRAINT or FOREIGN_KEY.
+/// Raw SQLite error codes like 2067 are meaningless in logs. 
+/// Translating constraint violations to readable names like 
+/// UNIQUE_CONSTRAINT or FOREIGN_KEY lets developers identify 
+/// the problem without looking up error codes in the SQLite 
+/// documentation.
 ///
 fn sqlight_error_message(code: sqlight.ErrorCode, msg: String) -> String {
   let code_str = case code {
@@ -66,3 +138,13 @@ fn sqlight_error_message(code: sqlight.ErrorCode, msg: String) -> String {
   }
   code_str <> ": " <> msg
 }
+
+// ------------------------------------------------------------- FFI Bindings
+
+/// The vtable passes connection handles as Dynamic to stay 
+/// driver-agnostic, but sqlight functions need a typed 
+/// Connection. An identity coerce is safe here because the 
+/// handle always originates from our pool.
+///
+@external(erlang, "glimr_pool_ffi", "identity")
+fn coerce(value: Dynamic) -> a

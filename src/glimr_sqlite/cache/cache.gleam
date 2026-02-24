@@ -1,26 +1,30 @@
 //// SQLite Cache Operations
 ////
-//// Provides cache operations using SQLite as the storage backend.
-//// Cache entries are stored in a database table with key, value,
-//// and expiration columns. Expired entries are cleaned up lazily.
+//// In-memory caches like ETS don't survive restarts and can't
+//// be shared across nodes. SQLite provides durable key-value
+//// storage with TTL support using a single table, keeping the
+//// deployment simple — no external services like Redis needed.
+//// Expired entries are cleaned up lazily rather than eagerly
+//// so reads stay fast and cleanup can run on a schedule.
 
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json.{type Json}
 import gleam/result
+import gleam/string
 import glimr/cache/cache.{
   type CacheError, ComputeError, ConnectionError, NotFound, SerializationError,
 }
+import glimr/db/pool_connection
 import glimr/utils/unix_timestamp
 import glimr_sqlite/cache/pool.{type Pool}
-import glimr_sqlite/db/pool as db_pool
-import sqlight
 
 // ------------------------------------------------------------- Public Functions
 
-/// Creates the cache table if it doesn't exist. Should be
-/// called during application startup or migration to ensure
-/// the cache storage is ready.
+/// Called during startup so the cache is ready before any
+/// request tries to read or write. IF NOT EXISTS makes this
+/// idempotent — safe to call on every boot without checking
+/// whether the table already exists.
 ///
 pub fn create_table(pool: Pool) -> Result(Nil, CacheError) {
   let table = pool.get_table(pool)
@@ -30,20 +34,20 @@ pub fn create_table(pool: Pool) -> Result(Nil, CacheError) {
     expiration INTEGER NOT NULL
   )"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case sqlight.exec(sql, conn) {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError(
-          "Failed to create cache table: " <> error_to_string(e),
-        ))
-    }
-  })
+  case pool_connection.exec(pool.get_db_pool(pool), sql, []) {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError(
+        "Failed to create cache table: " <> string.inspect(e),
+      ))
+  }
 }
 
-/// Retrieves a value from the cache by key. Returns NotFound
-/// if the key doesn't exist or has expired. Expired entries
-/// remain in the table until cleanup_expired is called.
+/// Filtering by expiration in the WHERE clause means expired
+/// entries are invisible to callers without needing a separate
+/// cleanup pass on every read. Entries with expiration = 0 are
+/// permanent and always returned regardless of the current
+/// timestamp.
 ///
 pub fn get(pool: Pool, key: String) -> Result(String, CacheError) {
   let table = pool.get_table(pool)
@@ -51,29 +55,28 @@ pub fn get(pool: Pool, key: String) -> Result(String, CacheError) {
   let sql =
     "SELECT value FROM "
     <> table
-    <> " WHERE key = ? AND (expiration = 0 OR expiration > ?)"
+    <> " WHERE key = $1 AND (expiration = 0 OR expiration > $2)"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case
-      sqlight.query(
-        sql,
-        conn,
-        [sqlight.text(key), sqlight.int(now)],
-        decode.at([0], decode.string),
-      )
-    {
-      Ok([value]) -> Ok(value)
-      Ok([]) -> Error(NotFound)
-      Ok(_) -> Error(NotFound)
-      Error(e) ->
-        Error(ConnectionError("Failed to get cache key: " <> error_to_string(e)))
-    }
-  })
+  case
+    pool_connection.query(
+      pool.get_db_pool(pool),
+      sql,
+      [pool_connection.string(key), pool_connection.int(now)],
+      decode.at([0], decode.string),
+    )
+  {
+    Ok(pool_connection.QueryResult(_, [value])) -> Ok(value)
+    Ok(_) -> Error(NotFound)
+    Error(e) ->
+      Error(ConnectionError("Failed to get cache key: " <> string.inspect(e)))
+  }
 }
 
-/// Stores a value in the cache with a TTL (time-to-live) in
-/// seconds. Overwrites any existing value for the same key
-/// with the new value and expiration.
+/// UPSERT via ON CONFLICT means callers don't need to check
+/// whether a key exists before writing — new keys are inserted
+/// and existing keys are updated in a single atomic operation.
+/// The TTL is converted to an absolute timestamp at write time
+/// so reads only need a simple comparison.
 ///
 pub fn put(
   pool: Pool,
@@ -84,29 +87,26 @@ pub fn put(
   let table = pool.get_table(pool)
   let expiration = unix_timestamp.now() + ttl_seconds
   let sql =
-    "INSERT OR REPLACE INTO "
-    <> table
-    <> " (key, value, expiration) VALUES (?, ?, ?)"
+    "INSERT INTO " <> table <> " (key, value, expiration) VALUES ($1, $2, $3)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value, expiration = excluded.expiration"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case
-      sqlight.query(
-        sql,
-        conn,
-        [sqlight.text(key), sqlight.text(value), sqlight.int(expiration)],
-        decode.success(Nil),
-      )
-    {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError("Failed to set cache key: " <> error_to_string(e)))
-    }
-  })
+  case
+    pool_connection.exec(pool.get_db_pool(pool), sql, [
+      pool_connection.string(key),
+      pool_connection.string(value),
+      pool_connection.int(expiration),
+    ])
+  {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError("Failed to set cache key: " <> string.inspect(e)))
+  }
 }
 
-/// Stores a value in the cache permanently (no expiration).
-/// Uses expiration value of 0 to indicate the entry never
-/// expires.
+/// Configuration values and other data that should survive
+/// cache cleanup need permanent storage. Using 0 as a sentinel
+/// for "never expires" keeps the schema simple — no nullable
+/// column needed, and the get query already handles the check.
 ///
 pub fn put_forever(
   pool: Pool,
@@ -115,48 +115,45 @@ pub fn put_forever(
 ) -> Result(Nil, CacheError) {
   let table = pool.get_table(pool)
   let sql =
-    "INSERT OR REPLACE INTO "
-    <> table
-    <> " (key, value, expiration) VALUES (?, ?, 0)"
+    "INSERT INTO " <> table <> " (key, value, expiration) VALUES ($1, $2, 0)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value, expiration = 0"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case
-      sqlight.query(
-        sql,
-        conn,
-        [sqlight.text(key), sqlight.text(value)],
-        decode.success(Nil),
-      )
-    {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError("Failed to set cache key: " <> error_to_string(e)))
-    }
-  })
+  case
+    pool_connection.exec(pool.get_db_pool(pool), sql, [
+      pool_connection.string(key),
+      pool_connection.string(value),
+    ])
+  {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError("Failed to set cache key: " <> string.inspect(e)))
+  }
 }
 
-/// Removes a value from the cache by key. Returns Ok even if
-/// the key didn't exist, making it safe to call without
-/// checking existence first.
+/// Returning Ok for missing keys makes forget idempotent —
+/// callers can invalidate a key without first checking whether
+/// it exists, avoiding a race condition between the check and
+/// the delete in concurrent environments.
 ///
 pub fn forget(pool: Pool, key: String) -> Result(Nil, CacheError) {
   let table = pool.get_table(pool)
-  let sql = "DELETE FROM " <> table <> " WHERE key = ?"
+  let sql = "DELETE FROM " <> table <> " WHERE key = $1"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case sqlight.query(sql, conn, [sqlight.text(key)], decode.success(Nil)) {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError(
-          "Failed to delete cache key: " <> error_to_string(e),
-        ))
-    }
-  })
+  case
+    pool_connection.exec(pool.get_db_pool(pool), sql, [
+      pool_connection.string(key),
+    ])
+  {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError("Failed to delete cache key: " <> string.inspect(e)))
+  }
 }
 
-/// Checks if a key exists in the cache and hasn't expired.
-/// Uses get internally to check both existence and
-/// expiration status.
+/// A Bool check is simpler than matching on a Result when the
+/// caller only needs to branch on presence — like deciding
+/// whether to show a cached banner or fetch a fresh one.
+/// Delegates to get so expiration logic isn't duplicated.
 ///
 pub fn has(pool: Pool, key: String) -> Bool {
   case get(pool, key) {
@@ -165,26 +162,27 @@ pub fn has(pool: Pool, key: String) -> Bool {
   }
 }
 
-/// Removes all cached values from the table. Deletes every
-/// row regardless of expiration status, effectively resetting
-/// the cache.
+/// A full cache reset is needed during deployments or when
+/// cached data becomes stale across the board. Deleting all
+/// rows rather than dropping the table avoids needing to
+/// recreate the schema afterward.
 ///
 pub fn flush(pool: Pool) -> Result(Nil, CacheError) {
   let table = pool.get_table(pool)
   let sql = "DELETE FROM " <> table
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case sqlight.exec(sql, conn) {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError("Failed to flush cache: " <> error_to_string(e)))
-    }
-  })
+  case pool_connection.exec(pool.get_db_pool(pool), sql, []) {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError("Failed to flush cache: " <> string.inspect(e)))
+  }
 }
 
-/// Retrieves a JSON value from the cache and decodes it.
-/// Returns SerializationError if the cached value cannot
-/// be parsed as valid JSON matching the decoder.
+/// Most cached data is structured — lists, records, config
+/// objects. Combining retrieval and JSON decoding in one call
+/// avoids forcing callers to manually parse the string after
+/// every get. SerializationError distinguishes decode failures
+/// from missing keys so callers can handle each case.
 ///
 pub fn get_json(
   pool: Pool,
@@ -199,9 +197,10 @@ pub fn get_json(
   }
 }
 
-/// Stores a value as JSON in the cache with a TTL. Encodes
-/// the value using the provided encoder function before
-/// storing.
+/// Encoding to JSON before storage ensures the value can be
+/// decoded back by get_json without format mismatches. The
+/// encoder function is caller-provided so any Gleam type can
+/// be cached without the cache module knowing its shape.
 ///
 pub fn put_json(
   pool: Pool,
@@ -214,9 +213,10 @@ pub fn put_json(
   put(pool, key, json_string, ttl_seconds)
 }
 
-/// Stores a value as JSON in the cache permanently. Encodes
-/// the value using the provided encoder function before
-/// storing with no expiration.
+/// Mirrors put_json but for permanent entries — configuration
+/// data or computed results that are expensive to regenerate
+/// and don't go stale. Delegates to put_forever so the
+/// expiration = 0 sentinel is set consistently.
 ///
 pub fn put_json_forever(
   pool: Pool,
@@ -228,9 +228,11 @@ pub fn put_json_forever(
   put_forever(pool, key, json_string)
 }
 
-/// Retrieves a value and removes it from the cache in one
-/// operation. Useful for one-time tokens or consuming queued
-/// values.
+/// One-time tokens like email verification codes or CSRF
+/// nonces should be consumed on use — reading without deleting
+/// would let the same token be replayed. Getting then deleting
+/// in sequence is safe because a second concurrent pull would
+/// see NotFound after the first delete.
 ///
 pub fn pull(pool: Pool, key: String) -> Result(String, CacheError) {
   case get(pool, key) {
@@ -242,9 +244,11 @@ pub fn pull(pool: Pool, key: String) -> Result(String, CacheError) {
   }
 }
 
-/// Increments a numeric value in the cache. If the key
-/// doesn't exist, starts from 0. Preserves the original
-/// expiration timestamp.
+/// Rate limiters and counters need atomic-like increments
+/// without losing TTL information. Starting from 0 on missing
+/// keys avoids a separate "initialize then increment" pattern,
+/// and preserving the original expiration prevents a counter
+/// bump from accidentally extending a rate limit window.
 ///
 pub fn increment(pool: Pool, key: String, by: Int) -> Result(Int, CacheError) {
   case get(pool, key) {
@@ -283,17 +287,21 @@ pub fn increment(pool: Pool, key: String, by: Int) -> Result(Int, CacheError) {
   }
 }
 
-/// Decrements a numeric value in the cache. If the key
-/// doesn't exist, starts from 0. Delegates to increment
-/// with a negated value.
+/// Delegating to increment with a negated value avoids
+/// duplicating the TTL-preservation and missing-key logic.
+/// Useful for countdown-style caches like remaining API
+/// quota or available inventory slots.
 ///
 pub fn decrement(pool: Pool, key: String, by: Int) -> Result(Int, CacheError) {
   increment(pool, key, -by)
 }
 
-/// Gets a value from cache, or computes and stores it if not
-/// found. The compute function returns a Result to handle
-/// computation errors gracefully.
+/// The most common caching pattern — check cache first, then
+/// fall back to an expensive computation and store the result.
+/// Wrapping this in a single call prevents the "check, miss,
+/// compute, store" boilerplate from appearing at every call
+/// site. The compute function returns a Result so database
+/// or API errors propagate cleanly.
 ///
 pub fn remember(
   pool: Pool,
@@ -316,9 +324,10 @@ pub fn remember(
   }
 }
 
-/// Gets a value from cache, or computes and stores it
-/// permanently. Like remember but with no TTL for values
-/// that should never expire.
+/// Mirrors remember but for permanent entries — expensive
+/// computations whose results never go stale, like compiled
+/// templates or static configuration derived from the
+/// database. Avoids requiring a TTL when none applies.
 ///
 pub fn remember_forever(
   pool: Pool,
@@ -340,9 +349,11 @@ pub fn remember_forever(
   }
 }
 
-/// Gets a JSON value from cache, or computes, encodes, and
-/// stores it. Combines remember semantics with JSON encoding
-/// and decoding.
+/// Combines remember semantics with JSON serialization so
+/// structured data can be cached and computed in one call.
+/// Also retries on SerializationError in case the cached
+/// format changed between deployments — recomputing is safer
+/// than failing on stale JSON.
 ///
 pub fn remember_json(
   pool: Pool,
@@ -367,54 +378,60 @@ pub fn remember_json(
   }
 }
 
-/// Removes expired entries from the cache table. Can be
-/// called periodically to clean up stale data and reclaim
-/// storage space.
+/// Expired entries are invisible to reads but still occupy
+/// disk space. Running this on a schedule (e.g., hourly via
+/// a BEAM timer) keeps the table from growing unbounded
+/// without adding cleanup overhead to every read operation.
 ///
 pub fn cleanup_expired(pool: Pool) -> Result(Nil, CacheError) {
   let table = pool.get_table(pool)
   let now = unix_timestamp.now()
   let sql =
-    "DELETE FROM " <> table <> " WHERE expiration > 0 AND expiration <= ?"
+    "DELETE FROM " <> table <> " WHERE expiration > 0 AND expiration <= $1"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case sqlight.query(sql, conn, [sqlight.int(now)], decode.success(Nil)) {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError(
-          "Failed to cleanup expired entries: " <> error_to_string(e),
-        ))
-    }
-  })
+  case
+    pool_connection.exec(pool.get_db_pool(pool), sql, [
+      pool_connection.int(now),
+    ])
+  {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError(
+        "Failed to cleanup expired entries: " <> string.inspect(e),
+      ))
+  }
 }
 
 // ------------------------------------------------------------- Private Functions
 
-/// Gets the expiration timestamp for a key. Used internally
-/// by increment to preserve the original expiration when
-/// updating values.
+/// Increment needs the original expiration so it can write
+/// the updated value without accidentally resetting the TTL.
+/// A separate query is needed because get only returns the
+/// value, not the metadata.
 ///
 fn get_expiration(pool: Pool, key: String) -> Result(Int, CacheError) {
   let table = pool.get_table(pool)
-  let sql = "SELECT expiration FROM " <> table <> " WHERE key = ?"
+  let sql = "SELECT expiration FROM " <> table <> " WHERE key = $1"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case
-      sqlight.query(sql, conn, [sqlight.text(key)], decode.at([0], decode.int))
-    {
-      Ok([exp]) -> Ok(exp)
-      Ok(_) -> Error(NotFound)
-      Error(e) ->
-        Error(ConnectionError(
-          "Failed to get expiration: " <> error_to_string(e),
-        ))
-    }
-  })
+  case
+    pool_connection.query(
+      pool.get_db_pool(pool),
+      sql,
+      [pool_connection.string(key)],
+      decode.at([0], decode.int),
+    )
+  {
+    Ok(pool_connection.QueryResult(_, [exp])) -> Ok(exp)
+    Ok(_) -> Error(NotFound)
+    Error(e) ->
+      Error(ConnectionError("Failed to get expiration: " <> string.inspect(e)))
+  }
 }
 
-/// Stores a value with a specific expiration timestamp.
-/// Used internally by increment to preserve the original
-/// expiration when updating values.
+/// Unlike put which calculates expiration from a TTL, this
+/// accepts an absolute timestamp so increment can restore the
+/// exact original expiration. The same UPSERT pattern as put
+/// ensures atomicity.
 ///
 fn put_with_expiration(
   pool: Pool,
@@ -424,32 +441,18 @@ fn put_with_expiration(
 ) -> Result(Nil, CacheError) {
   let table = pool.get_table(pool)
   let sql =
-    "INSERT OR REPLACE INTO "
-    <> table
-    <> " (key, value, expiration) VALUES (?, ?, ?)"
+    "INSERT INTO " <> table <> " (key, value, expiration) VALUES ($1, $2, $3)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value, expiration = excluded.expiration"
 
-  db_pool.get_connection(pool.get_db_pool(pool), fn(conn) {
-    case
-      sqlight.query(
-        sql,
-        conn,
-        [sqlight.text(key), sqlight.text(value), sqlight.int(expiration)],
-        decode.success(Nil),
-      )
-    {
-      Ok(_) -> Ok(Nil)
-      Error(e) ->
-        Error(ConnectionError("Failed to set cache key: " <> error_to_string(e)))
-    }
-  })
-}
-
-/// Converts a sqlight error to a string. Extracts the
-/// error message from the SQLite error structure for
-/// inclusion in CacheError messages.
-///
-fn error_to_string(e: sqlight.Error) -> String {
-  case e {
-    sqlight.SqlightError(_, msg, _) -> msg
+  case
+    pool_connection.exec(pool.get_db_pool(pool), sql, [
+      pool_connection.string(key),
+      pool_connection.string(value),
+      pool_connection.int(expiration),
+    ])
+  {
+    Ok(_) -> Ok(Nil)
+    Error(e) ->
+      Error(ConnectionError("Failed to set cache key: " <> string.inspect(e)))
   }
 }

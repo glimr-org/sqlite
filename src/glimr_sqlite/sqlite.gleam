@@ -13,10 +13,12 @@
 import glimr/cache/driver.{type CacheStore} as cache_driver
 import glimr/config/database
 import glimr/db/driver
+import glimr/db/pool_connection.{type Pool}
 import glimr/session/session.{type Session}
 import glimr/session/store
 import glimr_sqlite/cache/pool.{type Pool as CachePool} as cache_pool
-import glimr_sqlite/db/pool.{type Pool}
+import glimr_sqlite/db/pool
+import glimr_sqlite/db/query
 import glimr_sqlite/session/session_store
 
 // ------------------------------------------------------------- Public Functions
@@ -33,9 +35,7 @@ pub fn start(name: String) -> Pool {
   let connections = database.load()
   let conn = driver.find_by_name(name, connections)
   let config = driver.to_config(conn)
-  let assert Ok(db_pool) = pool.start_pool(config)
-
-  db_pool
+  start_from_config(config)
 }
 
 /// Cache pools share the database connection pool rather than
@@ -66,4 +66,40 @@ pub fn start_session(pool: Pool) -> Session {
   store.cache_store(session)
 
   session.empty()
+}
+
+// ------------------------------------------------------------- Internal Public Functions
+
+/// Tests and benchmarks need pools without reading
+/// database.toml, so accepting a pre-built Config lets
+/// them bypass file I/O and supply in-memory or temp-file
+/// paths directly.
+///
+@internal
+pub fn start_from_config(config: pool_connection.Config) -> Pool {
+  let assert Ok(db_pool) = pool.start_pool(config)
+  wrap_pool(db_pool)
+}
+
+/// The core Pool type uses Dynamic-typed vtable callbacks so
+/// it works across drivers. Wrapping the SQLite-specific pool
+/// here wires in the query and exec implementations so the
+/// rest of the framework can use it without knowing the driver.
+///
+@internal
+pub fn wrap_pool(db_pool: pool.Pool) -> Pool {
+  let #(checkout, stop) = pool.raw_checkout(db_pool)
+
+  pool_connection.new_pool(
+    driver: pool_connection.Sqlite,
+    query_fn: pool_connection.to_dynamic(query.vtable_query),
+    exec_fn: pool_connection.to_dynamic(query.vtable_exec),
+    checkout: fn() {
+      case checkout() {
+        Ok(#(conn, release)) -> Ok(#(pool_connection.to_dynamic(conn), release))
+        Error(msg) -> Error(msg)
+      }
+    },
+    stop: stop,
+  )
 }

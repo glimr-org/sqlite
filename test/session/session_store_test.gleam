@@ -1,12 +1,11 @@
 import gleam/dict
 import gleeunit/should
 import glimr/config/database
+import glimr/db/pool_connection
 import glimr/session/store
-import glimr_sqlite/db/pool
 import glimr_sqlite/session/session_store
 import glimr_sqlite/sqlite
 import simplifile
-import sqlight
 
 const test_db = "test/fixtures/sqlite_test.db"
 
@@ -54,23 +53,19 @@ fn with_clean_session(f: fn() -> a) -> a {
   let db = sqlite.start("main")
 
   // Create sessions table
-  let _ =
-    pool.get_connection(db, fn(conn) {
-      sqlight.exec(
-        "CREATE TABLE IF NOT EXISTS sessions_test (
-          id TEXT PRIMARY KEY,
-          payload TEXT NOT NULL,
-          last_activity INTEGER NOT NULL
-        )",
-        conn,
-      )
-    })
+  let assert Ok(_) =
+    pool_connection.exec(
+      db,
+      "CREATE TABLE IF NOT EXISTS sessions_test (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        last_activity INTEGER NOT NULL
+      )",
+      [],
+    )
 
   // Truncate
-  let _ =
-    pool.get_connection(db, fn(conn) {
-      sqlight.exec("DELETE FROM sessions_test", conn)
-    })
+  let assert Ok(_) = pool_connection.exec(db, "DELETE FROM sessions_test", [])
 
   // Create and cache the session store
   let session = session_store.create(db)
@@ -78,7 +73,7 @@ fn with_clean_session(f: fn() -> a) -> a {
 
   let result = f()
 
-  pool.stop_pool(db)
+  pool_connection.stop_pool(db)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   result

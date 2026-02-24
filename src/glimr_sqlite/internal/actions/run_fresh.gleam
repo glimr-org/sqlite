@@ -1,10 +1,9 @@
 import gleam/dynamic/decode
-import gleam/int
 import gleam/list
+import gleam/string
 import glimr/console/console
-import glimr_sqlite/db/pool.{type Pool, get_connection}
+import glimr/db/pool_connection.{type Connection, type Pool}
 import glimr_sqlite/internal/actions/run_migrate
-import sqlight
 
 /// Drops first, then migrates — this order matters because
 /// run_migrate expects an empty or partially-migrated database.
@@ -13,16 +12,14 @@ import sqlight
 /// confusing duplicate-table errors.
 ///
 pub fn run(pool: Pool, database: String) -> Nil {
-  use conn <- get_connection(pool)
+  use conn <- pool_connection.get_connection(pool)
 
   // Drop all tables
   case drop_all_tables(conn) {
     Error(e) -> {
       console.output()
       |> console.line_error("Failed to drop tables:")
-      |> console.line(
-        "Error code: " <> int.to_string(sqlight.error_code_to_int(e.code)),
-      )
+      |> console.line(string.inspect(e))
       |> console.print()
     }
     Ok(_) -> {
@@ -44,19 +41,28 @@ pub fn run(pool: Pool, database: String) -> Nil {
 /// quotes handles tables whose names are SQL reserved words or
 /// contain special characters.
 ///
-fn drop_all_tables(conn: sqlight.Connection) -> Result(Nil, sqlight.Error) {
-  let tables_sql =
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+fn drop_all_tables(conn: Connection) -> Result(Nil, pool_connection.DbError) {
   let decoder = {
     use name <- decode.field(0, decode.string)
     decode.success(name)
   }
 
-  case sqlight.query(tables_sql, conn, [], decoder) {
-    Ok(tables) -> {
+  case
+    pool_connection.query_with(
+      conn,
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+      [],
+      decoder,
+    )
+  {
+    Ok(pool_connection.QueryResult(_, tables)) -> {
       list.each(tables, fn(table) {
-        let drop_sql = "DROP TABLE IF EXISTS \"" <> table <> "\""
-        let _ = sqlight.exec(drop_sql, conn)
+        let _ =
+          pool_connection.exec_with(
+            conn,
+            "DROP TABLE IF EXISTS \"" <> table <> "\"",
+            [],
+          )
         Nil
       })
       Ok(Nil)

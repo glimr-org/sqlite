@@ -3,22 +3,22 @@ import gleeunit/should
 import glimr/db/migrate as framework_migrate
 import glimr/db/pool_connection
 import glimr_sqlite/db/migrate
-import glimr_sqlite/db/pool
+import glimr_sqlite/sqlite
 import simplifile
-import sqlight
 
 const test_db = "test/fixtures/migrate_test.db"
 
-fn with_connection(f: fn(pool.Connection) -> a) -> a {
+fn with_connection(f: fn(pool_connection.Connection) -> a) -> a {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let config = pool_connection.SqliteConfig(test_db, 1)
-  let assert Ok(p) = pool.start_pool(config)
+  let core_pool = sqlite.start_from_config(config)
 
-  let result = pool.get_connection(p, f)
+  use conn <- pool_connection.get_connection(core_pool)
+  let result = f(conn)
 
-  pool.stop_pool(p)
+  pool_connection.stop_pool(core_pool)
   let _ = simplifile.delete(test_db)
   result
 }
@@ -30,15 +30,18 @@ pub fn ensure_table_creates_migrations_table_test() {
 
     // Verify table exists
     let decoder = decode.at([0], decode.string)
-    let assert Ok(tables) =
-      sqlight.query(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='_glimr_migrations'",
+    case
+      pool_connection.query_with(
         conn,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='_glimr_migrations'",
         [],
         decoder,
       )
-
-    tables |> should.equal(["_glimr_migrations"])
+    {
+      Ok(pool_connection.QueryResult(_, tables)) ->
+        tables |> should.equal(["_glimr_migrations"])
+      _ -> panic as "Expected one table"
+    }
   })
 }
 
@@ -70,18 +73,16 @@ pub fn get_applied_returns_versions_test() {
 
     // Insert some migration records
     let assert Ok(_) =
-      sqlight.query(
-        "INSERT INTO _glimr_migrations (version) VALUES (?)",
+      pool_connection.exec_with(
         conn,
-        [sqlight.text("001")],
-        decode.dynamic,
+        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
+        [pool_connection.string("001")],
       )
     let assert Ok(_) =
-      sqlight.query(
-        "INSERT INTO _glimr_migrations (version) VALUES (?)",
+      pool_connection.exec_with(
         conn,
-        [sqlight.text("002")],
-        decode.dynamic,
+        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
+        [pool_connection.string("002")],
       )
 
     let result = migrate.get_applied(conn)
@@ -98,25 +99,22 @@ pub fn get_applied_sorted_test() {
 
     // Insert out of order
     let assert Ok(_) =
-      sqlight.query(
-        "INSERT INTO _glimr_migrations (version) VALUES (?)",
+      pool_connection.exec_with(
         conn,
-        [sqlight.text("003")],
-        decode.dynamic,
+        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
+        [pool_connection.string("003")],
       )
     let assert Ok(_) =
-      sqlight.query(
-        "INSERT INTO _glimr_migrations (version) VALUES (?)",
+      pool_connection.exec_with(
         conn,
-        [sqlight.text("001")],
-        decode.dynamic,
+        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
+        [pool_connection.string("001")],
       )
     let assert Ok(_) =
-      sqlight.query(
-        "INSERT INTO _glimr_migrations (version) VALUES (?)",
+      pool_connection.exec_with(
         conn,
-        [sqlight.text("002")],
-        decode.dynamic,
+        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
+        [pool_connection.string("002")],
       )
 
     let result = migrate.get_applied(conn)
@@ -158,14 +156,18 @@ pub fn apply_pending_single_migration_test() {
 
     // Verify table was created
     let decoder = decode.at([0], decode.string)
-    let assert Ok(tables) =
-      sqlight.query(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
+    case
+      pool_connection.query_with(
         conn,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
         [],
         decoder,
       )
-    tables |> should.equal(["users"])
+    {
+      Ok(pool_connection.QueryResult(_, tables)) ->
+        tables |> should.equal(["users"])
+      _ -> panic as "Expected users table"
+    }
 
     // Verify migration was recorded
     let assert Ok(versions) = migrate.get_applied(conn)
@@ -219,14 +221,18 @@ pub fn apply_pending_multiple_statements_test() {
 
     // Verify both tables created
     let decoder = decode.at([0], decode.string)
-    let assert Ok(tables) =
-      sqlight.query(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('a', 'b') ORDER BY name",
+    case
+      pool_connection.query_with(
         conn,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('a', 'b') ORDER BY name",
         [],
         decoder,
       )
-    tables |> should.equal(["a", "b"])
+    {
+      Ok(pool_connection.QueryResult(_, tables)) ->
+        tables |> should.equal(["a", "b"])
+      _ -> panic as "Expected two tables"
+    }
   })
 }
 

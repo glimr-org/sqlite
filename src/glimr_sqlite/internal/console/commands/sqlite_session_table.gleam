@@ -1,7 +1,7 @@
 import glimr/config/session as session_config
 import glimr/console/command.{type Args, type Command, Flag}
+import glimr/db/pool_connection.{type Pool}
 import glimr_sqlite/console/command as command_sqlite
-import glimr_sqlite/db/pool.{type Pool}
 import glimr_sqlite/internal/actions/gen_session_table
 import glimr_sqlite/internal/actions/run_migrate
 

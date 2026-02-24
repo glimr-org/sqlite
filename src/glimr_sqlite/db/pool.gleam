@@ -1,8 +1,11 @@
-//// SQLite connection pool management.
+//// SQLite Connection Pool
 ////
-//// Provides connection pooling for SQLite databases. Pools 
-//// manage a set of reusable connections and handle checkout/
-//// checkin automatically through the get_connection function.
+//// Opening a new SQLite connection per query adds file I/O
+//// overhead and risks hitting OS file descriptor limits
+//// under load. A pool keeps a fixed set of connections
+//// open and lends them out on demand, so queries execute
+//// against already-open handles and callers never need to
+//// manage connection lifecycle themselves.
 
 import gleam/erlang/process
 import glimr/db/pool_connection.{
@@ -13,10 +16,11 @@ import sqlight
 
 // ------------------------------------------------------------- Public Types
 
-/// A SQLite connection pool. Manages reusable database 
-/// connections and handles checkout/checkin automatically. 
-/// Created with start_pool and should be stopped with stop_pool 
-/// when done.
+/// The pool must be opaque so callers can't bypass the
+/// checkout/checkin protocol by accessing the raw
+/// connections directly. Storing closures rather than
+/// an Erlang PID keeps the Erlang pool internals hidden
+/// from Gleam code.
 ///
 pub opaque type Pool {
   Pool(
@@ -25,9 +29,10 @@ pub opaque type Pool {
   )
 }
 
-/// Pool operations returned from FFI. Contains closures that
-/// capture the internal pool handle, providing checkout and
-/// stop functionality without exposing Erlang internals.
+/// The Erlang FFI returns closures that capture the pool
+/// handle internally, so a named record type is needed
+/// to receive them across the FFI boundary. This stays
+/// public so the FFI module can construct it.
 ///
 pub type PoolOps {
   PoolOps(
@@ -36,24 +41,27 @@ pub type PoolOps {
   )
 }
 
-/// A SQLite database connection. Obtained through get_connection
-/// and should not be stored or used outside the callback. This
-/// is an alias for the underlying sqlight.Connection type.
+/// Re-exporting sqlight.Connection under a local alias
+/// lets the rest of the codebase reference Connection
+/// without depending on sqlight directly, so swapping
+/// the underlying driver only requires changes here.
 ///
 pub type Connection =
   sqlight.Connection
 
-/// Represents errors that can occur during pool operations.
-/// Re-exported from pool_connection for convenience.
+/// Re-exporting DbError here keeps downstream modules
+/// from importing pool_connection just for the error
+/// type, reducing coupling to the framework internals.
 ///
 pub type DbError =
   pool_connection.DbError
 
 // ------------------------------------------------------------- Public Functions
 
-/// Creates a new connection pool from the given configuration.
-/// The pool manages a set of reusable database connections and
-/// handles checkout/checkin automatically.
+/// Wrapping the FFI result in the opaque Pool type ensures
+/// callers interact with the pool only through the public
+/// API. The Config is validated inside start, so errors
+/// from misconfiguration surface here rather than later.
 ///
 pub fn start_pool(config: Config) -> Result(Pool, DbError) {
   case start(config) {
@@ -62,17 +70,19 @@ pub fn start_pool(config: Config) -> Result(Pool, DbError) {
   }
 }
 
-/// Stops a connection pool and closes all connections. Should
-/// be called when the pool is no longer needed to free
-/// resources. Any connections still in use will be closed.
+/// SQLite file locks aren't released until connections
+/// close, so stopping the pool explicitly prevents lock
+/// contention if another process needs the database
+/// file after this application is done with it.
 ///
 pub fn stop_pool(pool: Pool) -> Nil {
   pool.stop()
 }
 
-/// Executes a function with a connection from the pool. The
-/// connection is automatically checked out before the function
-/// runs and returned to the pool when it completes.
+/// A callback-based API guarantees the connection is
+/// returned to the pool even if the function crashes,
+/// preventing connection leaks that would eventually
+/// exhaust the pool under sustained traffic.
 ///
 pub fn get_connection(pool: Pool, f: fn(Connection) -> a) -> a {
   case pool.checkout() {
@@ -85,11 +95,23 @@ pub fn get_connection(pool: Pool, f: fn(Connection) -> a) -> a {
   }
 }
 
-// ------------------------------------------------------------- Internal Functions
+/// The framework's driver-agnostic Pool vtable needs the
+/// raw checkout and stop closures to wire SQLite into
+/// the shared pool_connection interface. Returning a
+/// tuple avoids exposing the opaque Pool internals.
+///
+pub fn raw_checkout(
+  pool: Pool,
+) -> #(fn() -> Result(#(sqlight.Connection, fn() -> Nil), String), fn() -> Nil) {
+  #(pool.checkout, pool.stop)
+}
 
-/// Starts a SQLite connection pool from the given configuration.
-/// Only accepts SqliteConfig, returns an error for Postgres
-/// configurations. Returns PoolOps with closures on success.
+// ------------------------------------------------------------- Private Functions
+
+/// Config is a shared union across drivers, so a Postgres
+/// variant could arrive here by mistake. Matching on the
+/// config type and rejecting non-SQLite variants gives a
+/// clear error instead of a confusing FFI crash.
 ///
 fn start(config: Config) -> Result(PoolOps, String) {
   case config {
@@ -105,9 +127,11 @@ fn start(config: Config) -> Result(PoolOps, String) {
 
 // ------------------------------------------------------------- FFI Bindings
 
-/// FFI call to start a pool via Erlang. Returns PoolOps with
-/// closures that capture the pool handle internally. The Erlang
-/// side manages the actual pool lifecycle and connections.
+/// SQLite's C library is accessed through NIF bindings
+/// that require Erlang-level process management for
+/// connection pooling. Delegating to an Erlang module
+/// lets us reuse battle-tested pooling (e.g. poolboy)
+/// rather than reimplementing it in Gleam.
 ///
 @external(erlang, "sqlite_pool_ffi", "start_pool")
 fn ffi_start_pool(

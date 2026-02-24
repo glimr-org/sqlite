@@ -6,7 +6,7 @@ import glimr/cache/driver
 import glimr/db/pool_connection
 import glimr_sqlite/cache/cache as sqlite_cache
 import glimr_sqlite/cache/pool as cache_pool
-import glimr_sqlite/db/pool as db_pool
+import glimr_sqlite/sqlite
 import simplifile
 
 const test_db = "test/fixtures/cache_test.db"
@@ -16,17 +16,17 @@ fn setup_test_pool() -> cache_pool.Pool {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let db_config = pool_connection.SqliteConfig(test_db, 2)
-  let assert Ok(db) = db_pool.start_pool(db_config)
+  let core_pool = sqlite.start_from_config(db_config)
 
   let store = driver.DatabaseStore("test", "main", "cache")
-  let pool = cache_pool.start_pool(db, store)
+  let pool = cache_pool.start_pool(core_pool, store)
 
   let assert Ok(_) = sqlite_cache.create_table(pool)
   pool
 }
 
 fn cleanup(pool: cache_pool.Pool) -> Nil {
-  let _ = db_pool.stop_pool(cache_pool.get_db_pool(pool))
+  let _ = pool_connection.stop_pool(cache_pool.get_db_pool(pool))
   let _ = simplifile.delete(test_db)
   Nil
 }

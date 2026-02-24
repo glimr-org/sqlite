@@ -5,7 +5,7 @@
 //// cached values with expiration timestamps.
 
 import glimr/cache/driver.{type CacheStore, DatabaseStore}
-import glimr_sqlite/db/pool.{type Pool as DbPool}
+import glimr/db/pool_connection.{type Pool as DbPool}
 
 // ------------------------------------------------------------- Public Types
 

@@ -2,11 +2,10 @@ import gleam/dynamic/decode
 import gleeunit/should
 import glimr/cache/driver.{DatabaseStore} as _cache_driver
 import glimr/config/database
+import glimr/db/pool_connection
 import glimr_sqlite/cache/cache as sqlite_cache
-import glimr_sqlite/db/pool
 import glimr_sqlite/sqlite
 import simplifile
-import sqlight
 
 const test_db = "test/fixtures/sqlite_test.db"
 
@@ -70,20 +69,18 @@ pub fn start_with_valid_connection_test() {
 
   // Verify the pool works by executing a query
   let result =
-    pool.get_connection(p, fn(conn) {
-      sqlight.query(
-        "SELECT 1 + 1 as result",
-        conn,
-        [],
-        decode.at([0], decode.int),
-      )
-    })
+    pool_connection.query(
+      p,
+      "SELECT 1 + 1 as result",
+      [],
+      decode.at([0], decode.int),
+    )
 
   result |> should.be_ok
-  let assert Ok(rows) = result
+  let assert Ok(pool_connection.QueryResult(_, rows)) = result
   rows |> should.equal([2])
 
-  pool.stop_pool(p)
+  pool_connection.stop_pool(p)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
@@ -101,15 +98,13 @@ pub fn start_with_multiple_connections_test() {
 
   // Verify it works
   let result =
-    pool.get_connection(p, fn(conn) {
-      sqlight.query("SELECT 42", conn, [], decode.at([0], decode.int))
-    })
+    pool_connection.query(p, "SELECT 42", [], decode.at([0], decode.int))
 
   result |> should.be_ok
-  let assert Ok(rows) = result
+  let assert Ok(pool_connection.QueryResult(_, rows)) = result
   rows |> should.equal([42])
 
-  pool.stop_pool(p)
+  pool_connection.stop_pool(p)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   let _ = simplifile.delete("test/fixtures/sqlite_secondary.db")
@@ -125,35 +120,34 @@ pub fn start_creates_usable_pool_test() {
   let p = sqlite.start("test")
 
   // Create a table and insert data
-  let _ =
-    pool.get_connection(p, fn(conn) {
-      sqlight.exec(
-        "CREATE TABLE test_items (id INTEGER PRIMARY KEY, name TEXT)",
-        conn,
-      )
-    })
+  let assert Ok(_) =
+    pool_connection.exec(
+      p,
+      "CREATE TABLE test_items (id INTEGER PRIMARY KEY, name TEXT)",
+      [],
+    )
 
-  let _ =
-    pool.get_connection(p, fn(conn) {
-      sqlight.exec("INSERT INTO test_items (name) VALUES ('item1')", conn)
-    })
+  let assert Ok(_) =
+    pool_connection.exec(
+      p,
+      "INSERT INTO test_items (name) VALUES ('item1')",
+      [],
+    )
 
   // Query the data back
   let result =
-    pool.get_connection(p, fn(conn) {
-      sqlight.query(
-        "SELECT name FROM test_items WHERE id = 1",
-        conn,
-        [],
-        decode.at([0], decode.string),
-      )
-    })
+    pool_connection.query(
+      p,
+      "SELECT name FROM test_items WHERE id = 1",
+      [],
+      decode.at([0], decode.string),
+    )
 
   result |> should.be_ok
-  let assert Ok(rows) = result
+  let assert Ok(pool_connection.QueryResult(_, rows)) = result
   rows |> should.equal(["item1"])
 
-  pool.stop_pool(p)
+  pool_connection.stop_pool(p)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
@@ -174,17 +168,16 @@ pub fn start_cache_with_valid_store_test() {
   let db = sqlite.start("main")
 
   // Create the cache table
-  let _ =
-    pool.get_connection(db, fn(conn) {
-      sqlight.exec(
-        "CREATE TABLE IF NOT EXISTS start_cache_test (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL,
-          expiration INTEGER NOT NULL
-        )",
-        conn,
-      )
-    })
+  let assert Ok(_) =
+    pool_connection.exec(
+      db,
+      "CREATE TABLE IF NOT EXISTS start_cache_test (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        expiration INTEGER NOT NULL
+      )",
+      [],
+    )
 
   // Start the cache pool
   let cache = sqlite.start_cache(db, "cache", stores)
@@ -196,7 +189,7 @@ pub fn start_cache_with_valid_store_test() {
   |> should.equal("test_value")
   sqlite_cache.forget(cache, "test_key") |> should.be_ok
 
-  pool.stop_pool(db)
+  pool_connection.stop_pool(db)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
@@ -224,26 +217,26 @@ pub fn start_cache_with_multiple_stores_test() {
   let db = sqlite.start("main")
 
   // Create both cache tables
-  let _ =
-    pool.get_connection(db, fn(conn) {
-      let _ =
-        sqlight.exec(
-          "CREATE TABLE IF NOT EXISTS cache_primary_test (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            expiration INTEGER NOT NULL
-          )",
-          conn,
-        )
-      sqlight.exec(
-        "CREATE TABLE IF NOT EXISTS cache_secondary_test (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL,
-          expiration INTEGER NOT NULL
-        )",
-        conn,
-      )
-    })
+  let assert Ok(_) =
+    pool_connection.exec(
+      db,
+      "CREATE TABLE IF NOT EXISTS cache_primary_test (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        expiration INTEGER NOT NULL
+      )",
+      [],
+    )
+  let assert Ok(_) =
+    pool_connection.exec(
+      db,
+      "CREATE TABLE IF NOT EXISTS cache_secondary_test (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        expiration INTEGER NOT NULL
+      )",
+      [],
+    )
 
   // Start the secondary cache pool
   let cache = sqlite.start_cache(db, "secondary", stores)
@@ -255,7 +248,7 @@ pub fn start_cache_with_multiple_stores_test() {
   |> should.be_ok
   |> should.equal("secondary_value")
 
-  pool.stop_pool(db)
+  pool_connection.stop_pool(db)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
