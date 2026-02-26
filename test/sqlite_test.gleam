@@ -1,9 +1,9 @@
 import gleam/dynamic/decode
 import gleeunit/should
-import glimr/cache/driver.{DatabaseStore} as _cache_driver
+import glimr/cache/cache
+import glimr/cache/database as cache_database
 import glimr/config/database
 import glimr/db/pool_connection
-import glimr_sqlite/cache/cache as sqlite_cache
 import glimr_sqlite/sqlite
 import simplifile
 
@@ -161,10 +161,6 @@ pub fn start_cache_with_valid_store_test() {
 
   setup_config(main_connection_toml())
 
-  let stores = [
-    DatabaseStore(name: "cache", database: "main", table: "start_cache_test"),
-  ]
-
   let db = sqlite.start("main")
 
   // Create the cache table
@@ -180,14 +176,14 @@ pub fn start_cache_with_valid_store_test() {
     )
 
   // Start the cache pool
-  let cache = sqlite.start_cache(db, "cache", stores)
+  let pool = cache_database.start_with_table(db, "start_cache_test")
 
   // Verify it works by doing cache operations
-  sqlite_cache.put(cache, "test_key", "test_value", 3600) |> should.be_ok
-  sqlite_cache.get(cache, "test_key")
+  cache.put(pool, "test_key", "test_value", 3600) |> should.be_ok
+  cache.get(pool, "test_key")
   |> should.be_ok
   |> should.equal("test_value")
-  sqlite_cache.forget(cache, "test_key") |> should.be_ok
+  cache.forget(pool, "test_key") |> should.be_ok
 
   pool_connection.stop_pool(db)
   cleanup_config()
@@ -200,19 +196,6 @@ pub fn start_cache_with_multiple_stores_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   setup_config(main_connection_toml())
-
-  let stores = [
-    DatabaseStore(
-      name: "primary",
-      database: "main",
-      table: "cache_primary_test",
-    ),
-    DatabaseStore(
-      name: "secondary",
-      database: "main",
-      table: "cache_secondary_test",
-    ),
-  ]
 
   let db = sqlite.start("main")
 
@@ -239,12 +222,12 @@ pub fn start_cache_with_multiple_stores_test() {
     )
 
   // Start the secondary cache pool
-  let cache = sqlite.start_cache(db, "secondary", stores)
+  let pool = cache_database.start_with_table(db, "cache_secondary_test")
 
   // Verify it works
-  sqlite_cache.put(cache, "secondary_key", "secondary_value", 3600)
+  cache.put(pool, "secondary_key", "secondary_value", 3600)
   |> should.be_ok
-  sqlite_cache.get(cache, "secondary_key")
+  cache.get(pool, "secondary_key")
   |> should.be_ok
   |> should.equal("secondary_value")
 
