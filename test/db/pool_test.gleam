@@ -1,6 +1,6 @@
 import gleam/dynamic/decode
 import gleeunit/should
-import glimr/db/pool_connection
+import glimr/db/db
 import glimr_sqlite/db/pool
 import simplifile
 import sqlight
@@ -12,7 +12,7 @@ pub fn start_pool_with_valid_config_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let config = pool_connection.SqliteConfig(test_db, 2)
+  let config = db.SqliteConfig(test_db, 2)
   let result = pool.start_pool(config)
 
   result |> should.be_ok
@@ -26,7 +26,7 @@ pub fn start_pool_with_valid_config_test() {
 }
 
 pub fn start_pool_with_invalid_path_test() {
-  let config = pool_connection.SqliteConfig("/nonexistent/path/db.sqlite", 2)
+  let config = db.SqliteConfig("/nonexistent/path/db.sqlite", 2)
   let result = pool.start_pool(config)
 
   result |> should.be_error
@@ -36,7 +36,7 @@ pub fn stop_pool_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let config = pool_connection.SqliteConfig(test_db, 2)
+  let config = db.SqliteConfig(test_db, 2)
   let assert Ok(p) = pool.start_pool(config)
 
   // Should not panic
@@ -51,7 +51,7 @@ pub fn get_connection_executes_query_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let config = pool_connection.SqliteConfig(test_db, 2)
+  let config = db.SqliteConfig(test_db, 2)
   let assert Ok(p) = pool.start_pool(config)
 
   let result =
@@ -77,7 +77,7 @@ pub fn get_connection_multiple_times_test() {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let config = pool_connection.SqliteConfig(test_db, 2)
+  let config = db.SqliteConfig(test_db, 2)
   let assert Ok(p) = pool.start_pool(config)
 
   // Get connection multiple times

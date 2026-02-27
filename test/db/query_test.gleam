@@ -1,6 +1,6 @@
 import gleam/dynamic/decode
 import gleeunit/should
-import glimr/db/pool_connection.{QueryError}
+import glimr/db/db.{QueryError}
 import glimr_sqlite/db/pool
 import glimr_sqlite/db/query
 import simplifile
@@ -12,7 +12,7 @@ fn with_pool(f: fn(pool.Pool) -> a) -> a {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let config = pool_connection.SqliteConfig(test_db, 2)
+  let config = db.SqliteConfig(test_db, 2)
   let assert Ok(p) = pool.start_pool(config)
 
   let result = f(p)

@@ -1,6 +1,6 @@
 import gleam/option.{None, Some}
 import gleeunit/should
-import glimr/db/pool_connection.{
+import glimr/db/db.{
   BlobValue, BoolValue, FloatValue, IntValue, NullValue, StringValue,
 }
 import glimr_sqlite/db/gen

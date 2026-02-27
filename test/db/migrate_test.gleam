@@ -1,23 +1,23 @@
 import gleam/dynamic/decode
 import gleeunit/should
+import glimr/db/db
 import glimr/db/migrate
-import glimr/db/pool_connection
 import glimr_sqlite/sqlite
 import simplifile
 
 const test_db = "test/fixtures/migrate_test.db"
 
-fn with_connection(f: fn(pool_connection.Connection) -> a) -> a {
+fn with_connection(f: fn(db.Connection) -> a) -> a {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let config = pool_connection.SqliteConfig(test_db, 1)
+  let config = db.SqliteConfig(test_db, 1)
   let core_pool = sqlite.start_from_config(config)
 
-  use conn <- pool_connection.get_connection(core_pool)
+  use conn <- db.get_connection(core_pool)
   let result = f(conn)
 
-  pool_connection.stop_pool(core_pool)
+  db.stop_pool(core_pool)
   let _ = simplifile.delete(test_db)
   result
 }
@@ -30,14 +30,14 @@ pub fn ensure_table_creates_migrations_table_test() {
     // Verify table exists
     let decoder = decode.at([0], decode.string)
     case
-      pool_connection.query_with(
+      db.query_with(
         conn,
         "SELECT name FROM sqlite_master WHERE type='table' AND name='_glimr_migrations'",
         [],
         decoder,
       )
     {
-      Ok(pool_connection.QueryResult(_, tables)) ->
+      Ok(db.QueryResult(_, tables)) ->
         tables |> should.equal(["_glimr_migrations"])
       _ -> panic as "Expected one table"
     }
@@ -72,17 +72,13 @@ pub fn get_applied_returns_versions_test() {
 
     // Insert some migration records
     let assert Ok(_) =
-      pool_connection.exec_with(
-        conn,
-        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
-        [pool_connection.string("001")],
-      )
+      db.exec_with(conn, "INSERT INTO _glimr_migrations (version) VALUES ($1)", [
+        db.string("001"),
+      ])
     let assert Ok(_) =
-      pool_connection.exec_with(
-        conn,
-        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
-        [pool_connection.string("002")],
-      )
+      db.exec_with(conn, "INSERT INTO _glimr_migrations (version) VALUES ($1)", [
+        db.string("002"),
+      ])
 
     let result = migrate.get_applied(conn)
 
@@ -98,23 +94,17 @@ pub fn get_applied_sorted_test() {
 
     // Insert out of order
     let assert Ok(_) =
-      pool_connection.exec_with(
-        conn,
-        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
-        [pool_connection.string("003")],
-      )
+      db.exec_with(conn, "INSERT INTO _glimr_migrations (version) VALUES ($1)", [
+        db.string("003"),
+      ])
     let assert Ok(_) =
-      pool_connection.exec_with(
-        conn,
-        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
-        [pool_connection.string("001")],
-      )
+      db.exec_with(conn, "INSERT INTO _glimr_migrations (version) VALUES ($1)", [
+        db.string("001"),
+      ])
     let assert Ok(_) =
-      pool_connection.exec_with(
-        conn,
-        "INSERT INTO _glimr_migrations (version) VALUES ($1)",
-        [pool_connection.string("002")],
-      )
+      db.exec_with(conn, "INSERT INTO _glimr_migrations (version) VALUES ($1)", [
+        db.string("002"),
+      ])
 
     let result = migrate.get_applied(conn)
 
@@ -156,15 +146,14 @@ pub fn apply_pending_single_migration_test() {
     // Verify table was created
     let decoder = decode.at([0], decode.string)
     case
-      pool_connection.query_with(
+      db.query_with(
         conn,
         "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
         [],
         decoder,
       )
     {
-      Ok(pool_connection.QueryResult(_, tables)) ->
-        tables |> should.equal(["users"])
+      Ok(db.QueryResult(_, tables)) -> tables |> should.equal(["users"])
       _ -> panic as "Expected users table"
     }
 
@@ -221,15 +210,14 @@ pub fn apply_pending_multiple_statements_test() {
     // Verify both tables created
     let decoder = decode.at([0], decode.string)
     case
-      pool_connection.query_with(
+      db.query_with(
         conn,
         "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('a', 'b') ORDER BY name",
         [],
         decoder,
       )
     {
-      Ok(pool_connection.QueryResult(_, tables)) ->
-        tables |> should.equal(["a", "b"])
+      Ok(db.QueryResult(_, tables)) -> tables |> should.equal(["a", "b"])
       _ -> panic as "Expected two tables"
     }
   })

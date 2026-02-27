@@ -10,7 +10,7 @@
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode.{type Decoder}
 import gleam/list
-import glimr/db/pool_connection.{
+import glimr/db/db.{
   type DbError, type QueryResult, type Value, QueryError, QueryResult,
 }
 import glimr_sqlite/db/gen
@@ -56,7 +56,7 @@ pub fn exec(conn: Connection, sql: String) -> Result(Nil, DbError) {
   }
 }
 
-/// The framework's pool_connection dispatches through a vtable 
+/// The framework's db dispatches through a vtable 
 /// of Dynamic-typed callbacks so it stays driver-agnostic. This 
 /// function satisfies that interface by coercing the handle and 
 /// converting generic Values to sqlight-specific values before 

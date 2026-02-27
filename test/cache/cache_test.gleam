@@ -3,17 +3,17 @@ import gleam/json
 import gleeunit/should
 import glimr/cache/cache
 import glimr/cache/database as cache_database
-import glimr/db/pool_connection
+import glimr/db/db
 import glimr_sqlite/sqlite
 import simplifile
 
 const test_db = "test/fixtures/cache_test.db"
 
-fn setup_test_pool() -> #(cache.CachePool, pool_connection.DbPool) {
+fn setup_test_pool() -> #(cache.CachePool, db.DbPool) {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
-  let db_config = pool_connection.SqliteConfig(test_db, 2)
+  let db_config = db.SqliteConfig(test_db, 2)
   let core_pool = sqlite.start_from_config(db_config)
 
   let assert Ok(_) = cache_database.create_table(core_pool, "cache")
@@ -21,8 +21,8 @@ fn setup_test_pool() -> #(cache.CachePool, pool_connection.DbPool) {
   #(pool, core_pool)
 }
 
-fn cleanup(db_pool: pool_connection.DbPool) -> Nil {
-  let _ = pool_connection.stop_pool(db_pool)
+fn cleanup(db_pool: db.DbPool) -> Nil {
+  let _ = db.stop_pool(db_pool)
   let _ = simplifile.delete(test_db)
   Nil
 }

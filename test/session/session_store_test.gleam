@@ -1,7 +1,7 @@
 import gleam/dict
 import gleeunit/should
 import glimr/config/database
-import glimr/db/pool_connection
+import glimr/db/db
 import glimr/session/store
 import glimr_sqlite/session/session_store
 import glimr_sqlite/sqlite
@@ -54,7 +54,7 @@ fn with_clean_session(f: fn() -> a) -> a {
 
   // Create sessions table
   let assert Ok(_) =
-    pool_connection.exec(
+    db.exec(
       db,
       "CREATE TABLE IF NOT EXISTS sessions_test (
         id TEXT PRIMARY KEY,
@@ -65,7 +65,7 @@ fn with_clean_session(f: fn() -> a) -> a {
     )
 
   // Truncate
-  let assert Ok(_) = pool_connection.exec(db, "DELETE FROM sessions_test", [])
+  let assert Ok(_) = db.exec(db, "DELETE FROM sessions_test", [])
 
   // Create and cache the session store
   let session = session_store.create(db)
@@ -73,7 +73,7 @@ fn with_clean_session(f: fn() -> a) -> a {
 
   let result = f()
 
-  pool_connection.stop_pool(db)
+  db.stop_pool(db)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   result

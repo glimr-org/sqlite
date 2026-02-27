@@ -3,7 +3,7 @@ import gleeunit/should
 import glimr/cache/cache
 import glimr/cache/database as cache_database
 import glimr/config/database
-import glimr/db/pool_connection
+import glimr/db/db
 import glimr_sqlite/sqlite
 import simplifile
 
@@ -69,18 +69,13 @@ pub fn start_with_valid_connection_test() {
 
   // Verify the pool works by executing a query
   let result =
-    pool_connection.query(
-      p,
-      "SELECT 1 + 1 as result",
-      [],
-      decode.at([0], decode.int),
-    )
+    db.query(p, "SELECT 1 + 1 as result", [], decode.at([0], decode.int))
 
   result |> should.be_ok
-  let assert Ok(pool_connection.QueryResult(_, rows)) = result
+  let assert Ok(db.QueryResult(_, rows)) = result
   rows |> should.equal([2])
 
-  pool_connection.stop_pool(p)
+  db.stop_pool(p)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
@@ -97,14 +92,13 @@ pub fn start_with_multiple_connections_test() {
   let p = sqlite.start("secondary")
 
   // Verify it works
-  let result =
-    pool_connection.query(p, "SELECT 42", [], decode.at([0], decode.int))
+  let result = db.query(p, "SELECT 42", [], decode.at([0], decode.int))
 
   result |> should.be_ok
-  let assert Ok(pool_connection.QueryResult(_, rows)) = result
+  let assert Ok(db.QueryResult(_, rows)) = result
   rows |> should.equal([42])
 
-  pool_connection.stop_pool(p)
+  db.stop_pool(p)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   let _ = simplifile.delete("test/fixtures/sqlite_secondary.db")
@@ -121,22 +115,18 @@ pub fn start_creates_usable_pool_test() {
 
   // Create a table and insert data
   let assert Ok(_) =
-    pool_connection.exec(
+    db.exec(
       p,
       "CREATE TABLE test_items (id INTEGER PRIMARY KEY, name TEXT)",
       [],
     )
 
   let assert Ok(_) =
-    pool_connection.exec(
-      p,
-      "INSERT INTO test_items (name) VALUES ('item1')",
-      [],
-    )
+    db.exec(p, "INSERT INTO test_items (name) VALUES ('item1')", [])
 
   // Query the data back
   let result =
-    pool_connection.query(
+    db.query(
       p,
       "SELECT name FROM test_items WHERE id = 1",
       [],
@@ -144,10 +134,10 @@ pub fn start_creates_usable_pool_test() {
     )
 
   result |> should.be_ok
-  let assert Ok(pool_connection.QueryResult(_, rows)) = result
+  let assert Ok(db.QueryResult(_, rows)) = result
   rows |> should.equal(["item1"])
 
-  pool_connection.stop_pool(p)
+  db.stop_pool(p)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
@@ -165,7 +155,7 @@ pub fn start_cache_with_valid_store_test() {
 
   // Create the cache table
   let assert Ok(_) =
-    pool_connection.exec(
+    db.exec(
       db,
       "CREATE TABLE IF NOT EXISTS start_cache_test (
         key TEXT PRIMARY KEY,
@@ -185,7 +175,7 @@ pub fn start_cache_with_valid_store_test() {
   |> should.equal("test_value")
   cache.forget(pool, "test_key") |> should.be_ok
 
-  pool_connection.stop_pool(db)
+  db.stop_pool(db)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil
@@ -201,7 +191,7 @@ pub fn start_cache_with_multiple_stores_test() {
 
   // Create both cache tables
   let assert Ok(_) =
-    pool_connection.exec(
+    db.exec(
       db,
       "CREATE TABLE IF NOT EXISTS cache_primary_test (
         key TEXT PRIMARY KEY,
@@ -211,7 +201,7 @@ pub fn start_cache_with_multiple_stores_test() {
       [],
     )
   let assert Ok(_) =
-    pool_connection.exec(
+    db.exec(
       db,
       "CREATE TABLE IF NOT EXISTS cache_secondary_test (
         key TEXT PRIMARY KEY,
@@ -231,7 +221,7 @@ pub fn start_cache_with_multiple_stores_test() {
   |> should.be_ok
   |> should.equal("secondary_value")
 
-  pool_connection.stop_pool(db)
+  db.stop_pool(db)
   cleanup_config()
   let _ = simplifile.delete(test_db)
   Nil

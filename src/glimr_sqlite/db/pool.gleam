@@ -8,7 +8,7 @@
 //// manage connection lifecycle themselves.
 
 import gleam/erlang/process
-import glimr/db/pool_connection.{
+import glimr/db/db.{
   type Config, ConnectionError, PostgresConfig, PostgresParamsConfig,
   SqliteConfig,
 }
@@ -50,11 +50,11 @@ pub type Connection =
   sqlight.Connection
 
 /// Re-exporting DbError here keeps downstream modules
-/// from importing pool_connection just for the error
+/// from importing db just for the error
 /// type, reducing coupling to the framework internals.
 ///
 pub type DbError =
-  pool_connection.DbError
+  db.DbError
 
 // ------------------------------------------------------------- Public Functions
 
@@ -97,7 +97,7 @@ pub fn get_connection(pool: Pool, f: fn(Connection) -> a) -> a {
 
 /// The framework's driver-agnostic Pool vtable needs the
 /// raw checkout and stop closures to wire SQLite into
-/// the shared pool_connection interface. Returning a
+/// the shared db interface. Returning a
 /// tuple avoids exposing the opaque Pool internals.
 ///
 pub fn raw_checkout(
