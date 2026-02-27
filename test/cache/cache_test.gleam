@@ -286,10 +286,7 @@ pub fn remember_with_cache_hit_test() {
 
   cache.put(pool, "remember_key", "cached_value", 3600) |> should.be_ok
 
-  let compute_called = fn() { Ok("computed_value") }
-
-  cache.remember(pool, "remember_key", 3600, compute_called)
-  |> should.be_ok
+  cache.remember(pool, "remember_key", 3600, fn() { "computed_value" })
   |> should.equal("cached_value")
 
   cleanup(db)
@@ -298,10 +295,7 @@ pub fn remember_with_cache_hit_test() {
 pub fn remember_with_cache_miss_test() {
   let #(pool, db) = setup_test_pool()
 
-  let compute = fn() { Ok("computed_value") }
-
-  cache.remember(pool, "new_key", 3600, compute)
-  |> should.be_ok
+  cache.remember(pool, "new_key", 3600, fn() { "computed_value" })
   |> should.equal("computed_value")
 
   // Value should now be cached
@@ -312,26 +306,10 @@ pub fn remember_with_cache_miss_test() {
   cleanup(db)
 }
 
-pub fn remember_with_compute_failure_test() {
-  let #(pool, db) = setup_test_pool()
-
-  let compute = fn() { Error("compute failed") }
-
-  case cache.remember(pool, "fail_key", 3600, compute) {
-    Error(cache.ComputeError(_)) -> Nil
-    _ -> panic as "Expected ComputeError"
-  }
-
-  cleanup(db)
-}
-
 pub fn remember_forever_test() {
   let #(pool, db) = setup_test_pool()
 
-  let compute = fn() { Ok("forever_value") }
-
-  cache.remember_forever(pool, "forever_key", compute)
-  |> should.be_ok
+  cache.remember_forever(pool, "forever_key", fn() { "forever_value" })
   |> should.equal("forever_value")
 
   cache.get(pool, "forever_key")
@@ -346,17 +324,8 @@ pub fn remember_json_test() {
 
   let encoder = fn(n: Int) { json.int(n) }
   let decoder = decode.int
-  let compute = fn() { Ok(42) }
 
-  cache.remember_json(
-    pool,
-    "json_remember",
-    3600,
-    decoder,
-    compute,
-    encoder,
-  )
-  |> should.be_ok
+  cache.remember_json(pool, "json_remember", 3600, decoder, encoder, fn() { 42 })
   |> should.equal(42)
 
   // Value should now be cached
