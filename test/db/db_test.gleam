@@ -6,7 +6,7 @@ import simplifile
 
 const test_db = "test/fixtures/db_test.db"
 
-fn with_pool(f: fn(pool_connection.Pool) -> a) -> a {
+fn with_pool(f: fn(pool_connection.DbPool) -> a) -> a {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 

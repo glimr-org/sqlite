@@ -9,7 +9,7 @@ import simplifile
 
 const test_db = "test/fixtures/cache_test.db"
 
-fn setup_test_pool() -> #(cache.CachePool, pool_connection.Pool) {
+fn setup_test_pool() -> #(cache.CachePool, pool_connection.DbPool) {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
@@ -21,7 +21,7 @@ fn setup_test_pool() -> #(cache.CachePool, pool_connection.Pool) {
   #(pool, core_pool)
 }
 
-fn cleanup(db_pool: pool_connection.Pool) -> Nil {
+fn cleanup(db_pool: pool_connection.DbPool) -> Nil {
   let _ = pool_connection.stop_pool(db_pool)
   let _ = simplifile.delete(test_db)
   Nil
