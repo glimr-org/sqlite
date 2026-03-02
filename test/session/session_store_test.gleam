@@ -1,7 +1,8 @@
 import gleam/dict
 import gleeunit/should
-import glimr/config/database
+import glimr/config
 import glimr/db/db
+import glimr/db/driver
 import glimr/session/store
 import glimr_sqlite/session/session_store
 import glimr_sqlite/sqlite
@@ -16,7 +17,8 @@ const database_config_file = "config/database.toml"
 const session_config_file = "config/session.toml"
 
 fn setup_config() -> Nil {
-  database.clear_cache()
+  driver.clear_cache()
+  clear_config_cache()
   let _ = simplifile.create_directory_all(config_dir)
   let _ = simplifile.create_directory_all("test/fixtures")
   let _ = simplifile.write(database_config_file, "[connections.main]
@@ -27,21 +29,20 @@ fn setup_config() -> Nil {
   let _ =
     simplifile.write(
       session_config_file,
-      "[session]
-  table = \"sessions_test\"
-  cookie = \"test_session\"
-  lifetime = 120
-  expire_on_close = false
+      "table = \"sessions_test\"
+cookie = \"test_session\"
+lifetime = 120
+expire_on_close = false
 ",
     )
-  clear_session_config()
+  config.load()
   Nil
 }
 
 fn cleanup_config() -> Nil {
   let _ = simplifile.delete(database_config_file)
   let _ = simplifile.delete(session_config_file)
-  clear_session_config()
+  clear_config_cache()
   clear_session_store()
   Nil
 }
@@ -222,8 +223,8 @@ pub fn multiple_sessions_independent_test() {
 
 // ------------------------------------------------------------- FFI Helpers
 
-@external(erlang, "glimr_session_test_ffi", "clear_session_config")
-fn clear_session_config() -> Nil
+@external(erlang, "glimr_session_test_ffi", "clear_config_cache")
+fn clear_config_cache() -> Nil
 
 @external(erlang, "glimr_session_test_ffi", "clear_session_store")
 fn clear_session_store() -> Nil
