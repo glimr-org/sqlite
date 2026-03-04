@@ -15,8 +15,7 @@ import glimr/cache/cache.{type CachePool}
 import glimr/cache/database as cache_database
 import glimr/db/db.{type DbPool}
 import glimr/db/driver
-import glimr/session/session.{type Session}
-import glimr/session/store
+import glimr/session/store.{type SessionStore}
 import glimr_sqlite/db/pool
 import glimr_sqlite/db/query
 import glimr_sqlite/session/session_store
@@ -48,18 +47,14 @@ pub fn start_cache(db_pool: DbPool, name: String) -> CachePool {
   cache_database.start(db_pool, name)
 }
 
-/// Registers the SQLite session store in persistent_term so the
-/// session middleware can load, save, and destroy sessions
-/// without knowing which backend is active. This must be called
-/// at boot before any requests arrive — once registered, the
-/// store is available to every BEAM process without being
-/// threaded through function arguments.
+/// For apps already using SQLite, storing sessions in the same
+/// database keeps things simple — no Redis or extra
+/// infrastructure. Pass the result to `session.setup()` in your
+/// bootstrap and sessions live right alongside your application
+/// data.
 ///
-pub fn start_session(pool: DbPool) -> Session {
-  let session = session_store.create(pool)
-  store.cache_store(session)
-
-  session.empty()
+pub fn session_store(pool: DbPool) -> SessionStore {
+  session_store.create(pool)
 }
 
 // ------------------------------------------------------------- Internal Public Functions
@@ -89,13 +84,12 @@ pub fn start_from_config(config: db.Config) -> DbPool {
   wrap_pool(db_pool)
 }
 
-/// The framework's Pool type uses dynamic-typed vtable
-/// callbacks so it can work with any database driver without
-/// knowing the concrete types. This wires in the
-/// SQLite-specific query and exec implementations so code that
-/// receives a Pool can call db.query or
-/// db.exec and have it route to sqlight under the
-/// hood.
+/// The rest of the framework talks to databases through a
+/// generic DbPool — it doesn't know or care whether it's SQLite
+/// or Postgres underneath. This is where we plug sqlight's
+/// query and exec functions into that generic interface, so
+/// `db.query` on a SQLite pool routes to the right driver
+/// without any caller needing to know.
 ///
 @internal
 pub fn wrap_pool(db_pool: pool.Pool) -> DbPool {
