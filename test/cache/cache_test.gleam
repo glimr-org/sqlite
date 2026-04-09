@@ -281,21 +281,23 @@ pub fn decrement_test() {
 
 // ------------------------------------------------------------ Remember Operations
 
-pub fn remember_with_cache_hit_test() {
+pub fn try_remember_with_cache_hit_test() {
   let #(pool, db) = setup_test_pool()
 
   cache.put(pool, "remember_key", "cached_value", 3600) |> should.be_ok
 
-  cache.remember(pool, "remember_key", 3600, fn() { "computed_value" })
+  cache.try_remember(pool, "remember_key", 3600, fn() { Ok("computed_value") })
+  |> should.be_ok
   |> should.equal("cached_value")
 
   cleanup(db)
 }
 
-pub fn remember_with_cache_miss_test() {
+pub fn try_remember_with_cache_miss_test() {
   let #(pool, db) = setup_test_pool()
 
-  cache.remember(pool, "new_key", 3600, fn() { "computed_value" })
+  cache.try_remember(pool, "new_key", 3600, fn() { Ok("computed_value") })
+  |> should.be_ok
   |> should.equal("computed_value")
 
   // Value should now be cached
@@ -306,10 +308,27 @@ pub fn remember_with_cache_miss_test() {
   cleanup(db)
 }
 
-pub fn remember_forever_test() {
+pub fn try_remember_does_not_cache_errors_test() {
   let #(pool, db) = setup_test_pool()
 
-  cache.remember_forever(pool, "forever_key", fn() { "forever_value" })
+  cache.try_remember(pool, "failing_key", 3600, fn() { Error(Nil) })
+  |> should.be_error
+  |> should.equal(Nil)
+
+  // Key should still be missing
+  case cache.get(pool, "failing_key") {
+    Error(cache.NotFound) -> Nil
+    _ -> panic as "Expected NotFound error — errors must not be cached"
+  }
+
+  cleanup(db)
+}
+
+pub fn try_remember_forever_test() {
+  let #(pool, db) = setup_test_pool()
+
+  cache.try_remember_forever(pool, "forever_key", fn() { Ok("forever_value") })
+  |> should.be_ok
   |> should.equal("forever_value")
 
   cache.get(pool, "forever_key")
@@ -319,13 +338,16 @@ pub fn remember_forever_test() {
   cleanup(db)
 }
 
-pub fn remember_json_test() {
+pub fn try_remember_json_test() {
   let #(pool, db) = setup_test_pool()
 
   let encoder = fn(n: Int) { json.int(n) }
   let decoder = decode.int
 
-  cache.remember_json(pool, "json_remember", 3600, decoder, encoder, fn() { 42 })
+  cache.try_remember_json(pool, "json_remember", 3600, decoder, encoder, fn() {
+    Ok(42)
+  })
+  |> should.be_ok
   |> should.equal(42)
 
   // Value should now be cached
