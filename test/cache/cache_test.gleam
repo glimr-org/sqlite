@@ -1,8 +1,7 @@
 import gleam/dynamic/decode
 import gleam/json
 import gleeunit/should
-import glimr/cache/cache
-import glimr/cache/database as cache_database
+import glimr/cache
 import glimr/db/db
 import glimr_sqlite/sqlite
 import simplifile
@@ -16,8 +15,8 @@ fn setup_test_pool() -> #(cache.CachePool, db.DbPool) {
   let db_config = db.SqliteConfig(test_db, 2)
   let core_pool = sqlite.start_from_config(db_config)
 
-  let assert Ok(_) = cache_database.create_table(core_pool, "cache")
-  let pool = cache_database.start_with_table(core_pool, "cache")
+  let assert Ok(_) = cache.database_create_table(core_pool, "cache")
+  let pool = cache.database_start_with_table(core_pool, "cache")
   #(pool, core_pool)
 }
 
@@ -32,7 +31,7 @@ fn cleanup(db_pool: db.DbPool) -> Nil {
 pub fn create_table_test() {
   let #(_pool, db) = setup_test_pool()
   // Table already created in setup, this should be idempotent
-  cache_database.create_table(db, "cache") |> should.be_ok
+  cache.database_create_table(db, "cache") |> should.be_ok
   cleanup(db)
 }
 
@@ -281,22 +280,22 @@ pub fn decrement_test() {
 
 // ------------------------------------------------------------ Remember Operations
 
-pub fn try_remember_with_cache_hit_test() {
+pub fn remember_with_cache_hit_test() {
   let #(pool, db) = setup_test_pool()
 
   cache.put(pool, "remember_key", "cached_value", 3600) |> should.be_ok
 
-  cache.try_remember(pool, "remember_key", 3600, fn() { Ok("computed_value") })
+  cache.remember(pool, "remember_key", 3600, fn() { Ok("computed_value") })
   |> should.be_ok
   |> should.equal("cached_value")
 
   cleanup(db)
 }
 
-pub fn try_remember_with_cache_miss_test() {
+pub fn remember_with_cache_miss_test() {
   let #(pool, db) = setup_test_pool()
 
-  cache.try_remember(pool, "new_key", 3600, fn() { Ok("computed_value") })
+  cache.remember(pool, "new_key", 3600, fn() { Ok("computed_value") })
   |> should.be_ok
   |> should.equal("computed_value")
 
@@ -308,10 +307,10 @@ pub fn try_remember_with_cache_miss_test() {
   cleanup(db)
 }
 
-pub fn try_remember_does_not_cache_errors_test() {
+pub fn remember_does_not_cache_errors_test() {
   let #(pool, db) = setup_test_pool()
 
-  cache.try_remember(pool, "failing_key", 3600, fn() { Error(Nil) })
+  cache.remember(pool, "failing_key", 3600, fn() { Error(Nil) })
   |> should.be_error
   |> should.equal(Nil)
 
@@ -324,10 +323,10 @@ pub fn try_remember_does_not_cache_errors_test() {
   cleanup(db)
 }
 
-pub fn try_remember_forever_test() {
+pub fn remember_forever_test() {
   let #(pool, db) = setup_test_pool()
 
-  cache.try_remember_forever(pool, "forever_key", fn() { Ok("forever_value") })
+  cache.remember_forever(pool, "forever_key", fn() { Ok("forever_value") })
   |> should.be_ok
   |> should.equal("forever_value")
 
@@ -338,13 +337,13 @@ pub fn try_remember_forever_test() {
   cleanup(db)
 }
 
-pub fn try_remember_json_test() {
+pub fn remember_json_test() {
   let #(pool, db) = setup_test_pool()
 
   let encoder = fn(n: Int) { json.int(n) }
   let decoder = decode.int
 
-  cache.try_remember_json(pool, "json_remember", 3600, decoder, encoder, fn() {
+  cache.remember_json(pool, "json_remember", 3600, decoder, encoder, fn() {
     Ok(42)
   })
   |> should.be_ok
@@ -366,7 +365,7 @@ pub fn cleanup_expired_test() {
   // Store with 0 TTL (already expired by the time we check)
   cache.put(pool, "expired_key", "value", -1) |> should.be_ok
 
-  cache_database.cleanup_expired(db, "cache") |> should.be_ok
+  cache.database_cleanup_expired(db, "cache") |> should.be_ok
 
   cache.has(pool, "expired_key") |> should.equal(False)
 
@@ -380,7 +379,7 @@ pub fn cleanup_expired_keeps_valid_entries_test() {
   cache.put(pool, "valid", "value", 3600) |> should.be_ok
   cache.put_forever(pool, "permanent", "value") |> should.be_ok
 
-  cache_database.cleanup_expired(db, "cache") |> should.be_ok
+  cache.database_cleanup_expired(db, "cache") |> should.be_ok
 
   cache.has(pool, "expired") |> should.equal(False)
   cache.has(pool, "valid") |> should.equal(True)

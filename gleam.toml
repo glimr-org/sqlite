@@ -1,5 +1,5 @@
 name = "glimr_sqlite"
-version = "1.0.2"
+version = "1.0.3"
 
 description = "SQLite driver for the Glimr web framework"
 licences = ["MIT"]

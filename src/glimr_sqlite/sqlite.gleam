@@ -11,11 +11,10 @@
 ////
 
 import gleam/string
-import glimr/cache/cache.{type CachePool}
-import glimr/cache/database as cache_database
+import glimr/cache.{type CachePool}
 import glimr/db/db.{type DbPool}
 import glimr/db/driver
-import glimr/session/store.{type SessionStore}
+import glimr/session.{type SessionStore}
 import glimr_sqlite/db/pool
 import glimr_sqlite/db/query
 import glimr_sqlite/session/session_store
@@ -44,7 +43,7 @@ pub fn start(name: String) -> DbPool {
 /// and file backends.
 ///
 pub fn start_cache(db_pool: DbPool, name: String) -> CachePool {
-  cache_database.start(db_pool, name)
+  cache.database_start(db_pool, name)
 }
 
 /// For apps already using SQLite, storing sessions in the same
