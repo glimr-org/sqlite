@@ -1,7 +1,7 @@
 import gleam/dynamic/decode
 import gleeunit/should
 import glimr/db/db
-import glimr_sqlite/db/pool
+import glimr_sqlite/sqlite
 import simplifile
 import sqlight
 
@@ -13,12 +13,12 @@ pub fn start_pool_with_valid_config_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let config = db.SqliteConfig(test_db, 2)
-  let result = pool.start_pool(config)
+  let result = sqlite.start_pool(config)
 
   result |> should.be_ok
 
   let assert Ok(p) = result
-  pool.stop_pool(p)
+  sqlite.stop_pool(p)
 
   // Clean up
   let _ = simplifile.delete(test_db)
@@ -27,7 +27,7 @@ pub fn start_pool_with_valid_config_test() {
 
 pub fn start_pool_with_invalid_path_test() {
   let config = db.SqliteConfig("/nonexistent/path/db.sqlite", 2)
-  let result = pool.start_pool(config)
+  let result = sqlite.start_pool(config)
 
   result |> should.be_error
 }
@@ -37,10 +37,10 @@ pub fn stop_pool_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let config = db.SqliteConfig(test_db, 2)
-  let assert Ok(p) = pool.start_pool(config)
+  let assert Ok(p) = sqlite.start_pool(config)
 
   // Should not panic
-  pool.stop_pool(p)
+  sqlite.stop_pool(p)
 
   // Clean up
   let _ = simplifile.delete(test_db)
@@ -52,10 +52,10 @@ pub fn get_connection_executes_query_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let config = db.SqliteConfig(test_db, 2)
-  let assert Ok(p) = pool.start_pool(config)
+  let assert Ok(p) = sqlite.start_pool(config)
 
   let result =
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       sqlight.query(
         "SELECT 1 + 1 as result",
         conn,
@@ -68,7 +68,7 @@ pub fn get_connection_executes_query_test() {
   let assert Ok(rows) = result
   rows |> should.equal([2])
 
-  pool.stop_pool(p)
+  sqlite.stop_pool(p)
   let _ = simplifile.delete(test_db)
   Nil
 }
@@ -78,19 +78,19 @@ pub fn get_connection_multiple_times_test() {
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let config = db.SqliteConfig(test_db, 2)
-  let assert Ok(p) = pool.start_pool(config)
+  let assert Ok(p) = sqlite.start_pool(config)
 
   // Get connection multiple times
   let r1 =
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       sqlight.query("SELECT 1", conn, [], decode.at([0], decode.int))
     })
   let r2 =
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       sqlight.query("SELECT 2", conn, [], decode.at([0], decode.int))
     })
   let r3 =
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       sqlight.query("SELECT 3", conn, [], decode.at([0], decode.int))
     })
 
@@ -106,7 +106,7 @@ pub fn get_connection_multiple_times_test() {
   v2 |> should.equal(2)
   v3 |> should.equal(3)
 
-  pool.stop_pool(p)
+  sqlite.stop_pool(p)
   let _ = simplifile.delete(test_db)
   Nil
 }

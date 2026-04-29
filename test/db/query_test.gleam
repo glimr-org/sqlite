@@ -1,33 +1,32 @@
 import gleam/dynamic/decode
 import gleeunit/should
 import glimr/db/db.{QueryError}
-import glimr_sqlite/db/pool
-import glimr_sqlite/db/query
+import glimr_sqlite/sqlite
 import simplifile
 import sqlight
 
 const test_db = "test/fixtures/query_test.db"
 
-fn with_pool(f: fn(pool.Pool) -> a) -> a {
+fn with_pool(f: fn(sqlite.Pool) -> a) -> a {
   let _ = simplifile.delete(test_db)
   let _ = simplifile.create_directory_all("test/fixtures")
 
   let config = db.SqliteConfig(test_db, 2)
-  let assert Ok(p) = pool.start_pool(config)
+  let assert Ok(p) = sqlite.start_pool(config)
 
   let result = f(p)
 
-  pool.stop_pool(p)
+  sqlite.stop_pool(p)
   let _ = simplifile.delete(test_db)
   result
 }
 
 pub fn query_select_with_decoder_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       // Create table and insert data
       let assert Ok(_) =
-        query.exec(conn, "CREATE TABLE users (id INTEGER, name TEXT)")
+        sqlite.exec(conn, "CREATE TABLE users (id INTEGER, name TEXT)")
       let assert Ok(_) =
         sqlight.query(
           "INSERT INTO users (id, name) VALUES (?, ?)",
@@ -43,7 +42,7 @@ pub fn query_select_with_decoder_test() {
         decode.success(#(id, name))
       }
 
-      let result = query.query(conn, "SELECT id, name FROM users", [], decoder)
+      let result = sqlite.query(conn, "SELECT id, name FROM users", [], decoder)
 
       result |> should.be_ok
       let assert Ok(rows) = result
@@ -54,9 +53,9 @@ pub fn query_select_with_decoder_test() {
 
 pub fn query_with_parameters_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       let assert Ok(_) =
-        query.exec(conn, "CREATE TABLE items (id INTEGER, value TEXT)")
+        sqlite.exec(conn, "CREATE TABLE items (id INTEGER, value TEXT)")
       let assert Ok(_) =
         sqlight.query(
           "INSERT INTO items VALUES (1, 'one'), (2, 'two'), (3, 'three')",
@@ -67,7 +66,7 @@ pub fn query_with_parameters_test() {
 
       let decoder = decode.at([1], decode.string)
       let result =
-        query.query(
+        sqlite.query(
           conn,
           "SELECT * FROM items WHERE id > ?",
           [sqlight.int(1)],
@@ -83,12 +82,12 @@ pub fn query_with_parameters_test() {
 
 pub fn query_empty_result_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       let assert Ok(_) =
-        query.exec(conn, "CREATE TABLE empty_table (id INTEGER)")
+        sqlite.exec(conn, "CREATE TABLE empty_table (id INTEGER)")
 
       let decoder = decode.at([0], decode.int)
-      let result = query.query(conn, "SELECT * FROM empty_table", [], decoder)
+      let result = sqlite.query(conn, "SELECT * FROM empty_table", [], decoder)
 
       result |> should.be_ok
       let assert Ok(rows) = result
@@ -99,10 +98,10 @@ pub fn query_empty_result_test() {
 
 pub fn query_invalid_sql_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       let decoder = decode.at([0], decode.int)
       let result =
-        query.query(conn, "SELECT * FROM nonexistent_table", [], decoder)
+        sqlite.query(conn, "SELECT * FROM nonexistent_table", [], decoder)
 
       result |> should.be_error
       let assert Error(QueryError(msg)) = result
@@ -113,9 +112,9 @@ pub fn query_invalid_sql_test() {
 
 pub fn exec_create_table_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       let result =
-        query.exec(conn, "CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
+        sqlite.exec(conn, "CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
 
       result |> should.be_ok
     })
@@ -124,17 +123,17 @@ pub fn exec_create_table_test() {
 
 pub fn exec_insert_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
-      let assert Ok(_) = query.exec(conn, "CREATE TABLE numbers (n INTEGER)")
+    sqlite.get_connection(p, fn(conn) {
+      let assert Ok(_) = sqlite.exec(conn, "CREATE TABLE numbers (n INTEGER)")
 
-      let result = query.exec(conn, "INSERT INTO numbers VALUES (42)")
+      let result = sqlite.exec(conn, "INSERT INTO numbers VALUES (42)")
 
       result |> should.be_ok
 
       // Verify insertion
       let decoder = decode.at([0], decode.int)
       let assert Ok([n]) =
-        query.query(conn, "SELECT n FROM numbers", [], decoder)
+        sqlite.query(conn, "SELECT n FROM numbers", [], decoder)
       n |> should.equal(42)
     })
   })
@@ -142,17 +141,17 @@ pub fn exec_insert_test() {
 
 pub fn exec_update_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       let assert Ok(_) =
-        query.exec(conn, "CREATE TABLE data (id INTEGER, val INTEGER)")
-      let assert Ok(_) = query.exec(conn, "INSERT INTO data VALUES (1, 10)")
+        sqlite.exec(conn, "CREATE TABLE data (id INTEGER, val INTEGER)")
+      let assert Ok(_) = sqlite.exec(conn, "INSERT INTO data VALUES (1, 10)")
 
-      let result = query.exec(conn, "UPDATE data SET val = 20 WHERE id = 1")
+      let result = sqlite.exec(conn, "UPDATE data SET val = 20 WHERE id = 1")
       result |> should.be_ok
 
       let decoder = decode.at([1], decode.int)
       let assert Ok([val]) =
-        query.query(conn, "SELECT * FROM data", [], decoder)
+        sqlite.query(conn, "SELECT * FROM data", [], decoder)
       val |> should.equal(20)
     })
   })
@@ -160,17 +159,18 @@ pub fn exec_update_test() {
 
 pub fn exec_delete_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
-      let assert Ok(_) = query.exec(conn, "CREATE TABLE to_delete (id INTEGER)")
+    sqlite.get_connection(p, fn(conn) {
       let assert Ok(_) =
-        query.exec(conn, "INSERT INTO to_delete VALUES (1), (2), (3)")
+        sqlite.exec(conn, "CREATE TABLE to_delete (id INTEGER)")
+      let assert Ok(_) =
+        sqlite.exec(conn, "INSERT INTO to_delete VALUES (1), (2), (3)")
 
-      let result = query.exec(conn, "DELETE FROM to_delete WHERE id = 2")
+      let result = sqlite.exec(conn, "DELETE FROM to_delete WHERE id = 2")
       result |> should.be_ok
 
       let decoder = decode.at([0], decode.int)
       let assert Ok(rows) =
-        query.query(conn, "SELECT * FROM to_delete ORDER BY id", [], decoder)
+        sqlite.query(conn, "SELECT * FROM to_delete ORDER BY id", [], decoder)
       rows |> should.equal([1, 3])
     })
   })
@@ -178,8 +178,8 @@ pub fn exec_delete_test() {
 
 pub fn exec_invalid_sql_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
-      let result = query.exec(conn, "INVALID SQL STATEMENT")
+    sqlite.get_connection(p, fn(conn) {
+      let result = sqlite.exec(conn, "INVALID SQL STATEMENT")
 
       result |> should.be_error
     })
@@ -188,13 +188,13 @@ pub fn exec_invalid_sql_test() {
 
 pub fn exec_constraint_violation_test() {
   with_pool(fn(p) {
-    pool.get_connection(p, fn(conn) {
+    sqlite.get_connection(p, fn(conn) {
       let assert Ok(_) =
-        query.exec(conn, "CREATE TABLE unique_test (id INTEGER PRIMARY KEY)")
-      let assert Ok(_) = query.exec(conn, "INSERT INTO unique_test VALUES (1)")
+        sqlite.exec(conn, "CREATE TABLE unique_test (id INTEGER PRIMARY KEY)")
+      let assert Ok(_) = sqlite.exec(conn, "INSERT INTO unique_test VALUES (1)")
 
       // Try to insert duplicate
-      let result = query.exec(conn, "INSERT INTO unique_test VALUES (1)")
+      let result = sqlite.exec(conn, "INSERT INTO unique_test VALUES (1)")
 
       result |> should.be_error
       let assert Error(QueryError(msg)) = result

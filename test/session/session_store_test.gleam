@@ -4,7 +4,6 @@ import glimr/config
 import glimr/db/db
 import glimr/db/driver
 import glimr/session
-import glimr_sqlite/session/session_store
 import glimr_sqlite/sqlite
 import simplifile
 
@@ -69,7 +68,7 @@ fn with_clean_session(f: fn() -> a) -> a {
   let assert Ok(_) = db.exec(db, "DELETE FROM sessions_test", [])
 
   // Create and cache the session store
-  let store = session_store.create(db)
+  let store = sqlite.session_store(db)
   session.setup(store)
 
   let result = f()
